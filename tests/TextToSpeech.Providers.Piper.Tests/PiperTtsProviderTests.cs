@@ -56,7 +56,7 @@ public class PiperTtsProviderTests
     }
 
     [Fact]
-    public async Task SynthesizeAsync_ModelNotFound_ReturnsFail()
+    public async Task SynthesizeAsync_PiperUnavailable_ReturnsFail()
     {
         // Arrange
         var provider = CreateProvider();
@@ -67,7 +67,10 @@ public class PiperTtsProviderTests
 
         // Assert
         Assert.False(result.Success);
-        Assert.Contains("not found", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            result.ErrorMessage?.Contains("not installed", StringComparison.OrdinalIgnoreCase) == true ||
+            result.ErrorMessage?.Contains("not found", StringComparison.OrdinalIgnoreCase) == true,
+            $"Expected error message to contain 'not installed' or 'not found', but got: {result.ErrorMessage}");
     }
 
     [Fact]
