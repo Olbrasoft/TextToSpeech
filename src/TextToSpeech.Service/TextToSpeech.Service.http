@@ -1,0 +1,6 @@
+@TextToSpeech.Service_HostAddress = http://localhost:5195
+
+GET {{TextToSpeech.Service_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

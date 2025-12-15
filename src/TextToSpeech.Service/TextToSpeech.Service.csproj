@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Olbrasoft.TextToSpeech.Service</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TextToSpeech.Core\TextToSpeech.Core.csproj" />
+    <ProjectReference Include="..\TextToSpeech.Providers\TextToSpeech.Providers.csproj" />
+    <ProjectReference Include="..\TextToSpeech.Orchestration\TextToSpeech.Orchestration.csproj" />
+  </ItemGroup>
+
+</Project>
