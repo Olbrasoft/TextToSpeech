@@ -51,9 +51,9 @@ public sealed class EdgeTtsProvider : ITtsProvider
             {
                 text = request.Text,
                 voice = request.Voice ?? _config.DefaultVoice,
-                rate = request.Rate,
-                volume = 100,
-                pitch = request.Pitch,
+                rate = FormatRate(request.Rate),
+                volume = "+0%",
+                pitch = FormatPitch(request.Pitch),
                 play = false  // Don't play on server, return audio file path
             };
 
@@ -143,6 +143,18 @@ public sealed class EdgeTtsProvider : ITtsProvider
             ]
         });
     }
+
+    /// <summary>
+    /// Formats rate integer to EdgeTTS string format (e.g., 15 → "+15%", -10 → "-10%").
+    /// </summary>
+    private static string FormatRate(int rate) =>
+        rate >= 0 ? $"+{rate}%" : $"{rate}%";
+
+    /// <summary>
+    /// Formats pitch integer to EdgeTTS string format (e.g., 5 → "+5Hz", -5 → "-5Hz").
+    /// </summary>
+    private static string FormatPitch(int pitch) =>
+        pitch >= 0 ? $"+{pitch}Hz" : $"{pitch}Hz";
 
     private AudioData CreateAudioData(byte[] audioBytes, string text)
     {
