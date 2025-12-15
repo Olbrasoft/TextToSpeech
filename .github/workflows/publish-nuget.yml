@@ -11,6 +11,7 @@ permissions:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  VERSION_PREFIX: "1.1"
 
 jobs:
   build-publish:
@@ -26,11 +27,18 @@ jobs:
         dotnet-version: 10.0.x
         dotnet-quality: preview
 
+    - name: Calculate version
+      id: version
+      run: |
+        VERSION="${{ env.VERSION_PREFIX }}.${{ github.run_number }}"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Building version: $VERSION"
+
     - name: Restore dependencies
       run: dotnet restore
 
     - name: Build
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
 
     - name: Test
       run: dotnet test --configuration Release --no-build --verbosity normal
