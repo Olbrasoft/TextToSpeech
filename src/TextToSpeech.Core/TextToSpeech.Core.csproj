@@ -11,7 +11,7 @@
     <!-- NuGet Package -->
     <IsPackable>true</IsPackable>
     <PackageId>Olbrasoft.TextToSpeech.Core</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Olbrasoft</Authors>
     <Company>Olbrasoft</Company>
     <Description>Core interfaces and models for Text-to-Speech synthesis. Provides ITtsProvider, TtsRequest, TtsResult and other abstractions.</Description>

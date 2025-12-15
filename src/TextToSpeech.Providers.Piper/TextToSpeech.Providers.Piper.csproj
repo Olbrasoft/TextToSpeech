@@ -11,7 +11,7 @@
     <!-- NuGet Package -->
     <IsPackable>true</IsPackable>
     <PackageId>Olbrasoft.TextToSpeech.Providers.Piper</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Olbrasoft</Authors>
     <Company>Olbrasoft</Company>
     <Description>Piper TTS provider for offline, local text-to-speech synthesis using ONNX neural voice models.</Description>
