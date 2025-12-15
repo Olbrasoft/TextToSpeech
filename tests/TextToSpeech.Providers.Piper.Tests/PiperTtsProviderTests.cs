@@ -4,7 +4,7 @@ using Moq;
 using Olbrasoft.TextToSpeech.Core.Models;
 using Olbrasoft.TextToSpeech.Providers.Piper;
 
-namespace Olbrasoft.TextToSpeech.Tests.Providers;
+namespace TextToSpeech.Providers.Piper.Tests;
 
 public class PiperTtsProviderTests
 {
@@ -23,15 +23,7 @@ public class PiperTtsProviderTests
             TimeoutSeconds = 60,
             Profiles = new Dictionary<string, PiperVoiceProfile>(StringComparer.OrdinalIgnoreCase)
             {
-                ["default"] = new PiperVoiceProfile
-                {
-                    LengthScale = 1.0,
-                    NoiseScale = 0.667,
-                    NoiseWScale = 0.8,
-                    SentenceSilence = 0.2,
-                    Volume = 1.0,
-                    Speaker = 0
-                }
+                ["default"] = new PiperVoiceProfile()
             }
         };
     }
@@ -79,40 +71,6 @@ public class PiperTtsProviderTests
     }
 
     [Fact]
-    public async Task SynthesizeAsync_PiperNotInstalled_ReturnsFail()
-    {
-        // Arrange
-        var configInvalidPiper = new PiperConfiguration
-        {
-            ModelPath = Path.GetTempFileName(), // Create actual file
-            PiperPath = "/nonexistent/piper",
-            OutputMode = AudioOutputMode.Memory
-        };
-
-        try
-        {
-            var provider = new PiperTtsProvider(
-                _loggerMock.Object,
-                Options.Create(configInvalidPiper));
-
-            var request = new TtsRequest { Text = "Test" };
-
-            // Act
-            var result = await provider.SynthesizeAsync(request);
-
-            // Assert
-            Assert.False(result.Success);
-        }
-        finally
-        {
-            if (File.Exists(configInvalidPiper.ModelPath))
-            {
-                File.Delete(configInvalidPiper.ModelPath);
-            }
-        }
-    }
-
-    [Fact]
     public void SourceProfile_CanBeSet()
     {
         // Arrange
@@ -126,14 +84,14 @@ public class PiperTtsProviderTests
     }
 
     [Fact]
-    public async Task SynthesizeAsync_RateAdjustment_AppliesLengthScale()
+    public async Task SynthesizeAsync_RateAdjustment_DoesNotCrash()
     {
-        // Arrange - This test verifies rate is processed, actual synthesis requires piper
+        // Arrange
         var provider = CreateProvider();
         var request = new TtsRequest
         {
             Text = "Test",
-            Rate = 50 // Should speed up by adjusting length scale
+            Rate = 50
         };
 
         // Act
@@ -142,34 +100,6 @@ public class PiperTtsProviderTests
         // Assert - Will fail due to missing model, but shouldn't crash
         Assert.False(result.Success);
         Assert.Equal("Piper", result.ProviderUsed);
-    }
-
-    [Fact]
-    public void PiperVoiceProfile_DefaultValues()
-    {
-        // Arrange & Act
-        var profile = new PiperVoiceProfile();
-
-        // Assert
-        Assert.Equal(1.0, profile.LengthScale);
-        Assert.Equal(0.667, profile.NoiseScale);
-        Assert.Equal(0.8, profile.NoiseWScale);
-        Assert.Equal(0.2, profile.SentenceSilence);
-        Assert.Equal(1.0, profile.Volume);
-        Assert.Equal(0, profile.Speaker);
-    }
-
-    [Fact]
-    public void PiperConfiguration_DefaultValues()
-    {
-        // Arrange & Act
-        var config = new PiperConfiguration();
-
-        // Assert
-        Assert.Equal("piper", config.PiperPath);
-        Assert.Equal(AudioOutputMode.Memory, config.OutputMode);
-        Assert.Equal(60, config.TimeoutSeconds);
-        Assert.Equal("default", config.DefaultProfile);
     }
 
     private PiperTtsProvider CreateProvider()

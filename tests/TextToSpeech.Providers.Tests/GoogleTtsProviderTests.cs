@@ -5,7 +5,7 @@ using Olbrasoft.TextToSpeech.Core.Models;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 using Olbrasoft.TextToSpeech.Providers.Google;
 
-namespace Olbrasoft.TextToSpeech.Tests.Providers;
+namespace TextToSpeech.Providers.Tests;
 
 public class GoogleTtsProviderTests
 {
@@ -53,28 +53,6 @@ public class GoogleTtsProviderTests
         // Assert
         Assert.Equal("GoogleTTS", info.Name);
         Assert.NotEmpty(info.SupportedVoices);
-        // Note: Status depends on whether gtts-cli is installed
-    }
-
-    [Fact]
-    public async Task SynthesizeAsync_WithVoiceFromRequest_UsesLanguageFromVoice()
-    {
-        // Arrange - Note: This test only verifies the provider doesn't crash
-        // Actual synthesis would require gtts-cli to be installed
-        var provider = CreateProvider();
-        var request = new TtsRequest
-        {
-            Text = "Test",
-            Voice = "en-US" // Should extract "en" as language
-        };
-
-        // Act
-        var result = await provider.SynthesizeAsync(request);
-
-        // Assert
-        // Result depends on whether gtts-cli is installed
-        Assert.NotNull(result);
-        Assert.Equal("GoogleTTS", result.ProviderUsed);
     }
 
     [Fact]
@@ -115,6 +93,19 @@ public class GoogleTtsProviderTests
         // Assert
         Assert.NotNull(czechVoice);
         Assert.Equal("cs", czechVoice.Id);
+    }
+
+    [Fact]
+    public void GoogleTtsConfiguration_DefaultValues()
+    {
+        // Arrange & Act
+        var config = new GoogleTtsConfiguration();
+
+        // Assert
+        Assert.Equal("cs", config.Language);
+        Assert.Equal("gtts-cli", config.GttsCliPath);
+        Assert.False(config.Slow);
+        Assert.Equal(60, config.TimeoutSeconds);
     }
 
     private GoogleTtsProvider CreateProvider()

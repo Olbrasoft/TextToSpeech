@@ -1,6 +1,6 @@
 using Olbrasoft.TextToSpeech.Core.Models;
 
-namespace Olbrasoft.TextToSpeech.Tests.Models;
+namespace TextToSpeech.Core.Tests;
 
 public class TtsResultTests
 {
@@ -23,6 +23,20 @@ public class TtsResultTests
         Assert.Equal(providerUsed, result.ProviderUsed);
         Assert.Equal(generationTime, result.GenerationTime);
         Assert.Equal(audioDuration, result.AudioDuration);
+    }
+
+    [Fact]
+    public void Ok_WithoutAudioDuration_HasNullDuration()
+    {
+        // Arrange
+        var audioData = new MemoryAudioData { Data = new byte[] { 1, 2, 3 } };
+
+        // Act
+        var result = TtsResult.Ok(audioData, "TestProvider", TimeSpan.FromMilliseconds(50));
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Null(result.AudioDuration);
     }
 
     [Fact]
@@ -53,5 +67,15 @@ public class TtsResultTests
         // Assert
         Assert.False(result.Success);
         Assert.Null(result.ProviderUsed);
+    }
+
+    [Fact]
+    public void Fail_WithDefaultGenerationTime_HasZeroGenerationTime()
+    {
+        // Arrange & Act
+        var result = TtsResult.Fail("Error");
+
+        // Assert
+        Assert.Equal(TimeSpan.Zero, result.GenerationTime);
     }
 }

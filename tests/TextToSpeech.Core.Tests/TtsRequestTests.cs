@@ -1,11 +1,11 @@
 using Olbrasoft.TextToSpeech.Core.Models;
 
-namespace Olbrasoft.TextToSpeech.Tests.Models;
+namespace TextToSpeech.Core.Tests;
 
 public class TtsRequestTests
 {
     [Fact]
-    public void TtsRequest_RequiredText_MustBeSet()
+    public void Text_IsRequired()
     {
         // Arrange & Act
         var request = new TtsRequest { Text = "Hello, world!" };
@@ -15,7 +15,7 @@ public class TtsRequestTests
     }
 
     [Fact]
-    public void TtsRequest_DefaultRate_IsZero()
+    public void Rate_DefaultValue_IsZero()
     {
         // Arrange & Act
         var request = new TtsRequest { Text = "Test" };
@@ -25,7 +25,7 @@ public class TtsRequestTests
     }
 
     [Fact]
-    public void TtsRequest_DefaultPitch_IsZero()
+    public void Pitch_DefaultValue_IsZero()
     {
         // Arrange & Act
         var request = new TtsRequest { Text = "Test" };
@@ -35,7 +35,7 @@ public class TtsRequestTests
     }
 
     [Fact]
-    public void TtsRequest_Voice_IsOptional()
+    public void Voice_IsOptional()
     {
         // Arrange & Act
         var request = new TtsRequest { Text = "Test" };
@@ -45,7 +45,7 @@ public class TtsRequestTests
     }
 
     [Fact]
-    public void TtsRequest_PreferredProvider_IsOptional()
+    public void PreferredProvider_IsOptional()
     {
         // Arrange & Act
         var request = new TtsRequest { Text = "Test" };
@@ -55,7 +55,7 @@ public class TtsRequestTests
     }
 
     [Fact]
-    public void TtsRequest_AllProperties_CanBeSet()
+    public void AllProperties_CanBeSet()
     {
         // Arrange & Act
         var request = new TtsRequest

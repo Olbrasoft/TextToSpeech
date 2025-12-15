@@ -8,7 +8,7 @@ using Olbrasoft.TextToSpeech.Providers.EdgeTTS;
 using System.Net;
 using System.Text;
 
-namespace Olbrasoft.TextToSpeech.Tests.Providers;
+namespace TextToSpeech.Providers.Tests;
 
 public class EdgeTtsProviderTests
 {
@@ -66,7 +66,6 @@ public class EdgeTtsProviderTests
         var tempFile = Path.Combine(Path.GetTempPath(), "test_audio.mp3");
         try
         {
-            // Create a fake audio file
             await File.WriteAllBytesAsync(tempFile, new byte[] { 0xFF, 0xFB, 0x90, 0x00 });
 
             var response = $"{{\"success\": true, \"message\": \"Audio generated at: {tempFile}\"}}";

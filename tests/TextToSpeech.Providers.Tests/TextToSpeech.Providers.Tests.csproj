@@ -20,10 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\TextToSpeech.Core\TextToSpeech.Core.csproj" />
     <ProjectReference Include="..\..\src\TextToSpeech.Providers\TextToSpeech.Providers.csproj" />
-    <ProjectReference Include="..\..\src\TextToSpeech.Providers.Piper\TextToSpeech.Providers.Piper.csproj" />
-    <ProjectReference Include="..\..\src\TextToSpeech.Orchestration\TextToSpeech.Orchestration.csproj" />
   </ItemGroup>
 
 </Project>

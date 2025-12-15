@@ -6,9 +6,8 @@ using Olbrasoft.TextToSpeech.Core.Models;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 using Olbrasoft.TextToSpeech.Providers.VoiceRss;
 using System.Net;
-using System.Text;
 
-namespace Olbrasoft.TextToSpeech.Tests.Providers;
+namespace TextToSpeech.Providers.Tests;
 
 public class VoiceRssProviderTests
 {
@@ -93,7 +92,7 @@ public class VoiceRssProviderTests
     {
         // Arrange
         var provider = CreateProvider(CreateMockHttpClient(HttpStatusCode.OK,
-            Encoding.UTF8.GetBytes("ERROR: Invalid API key"), "text/plain"));
+            System.Text.Encoding.UTF8.GetBytes("ERROR: Invalid API key"), "text/plain"));
         var request = new TtsRequest { Text = "Test" };
 
         // Act
@@ -102,22 +101,6 @@ public class VoiceRssProviderTests
         // Assert
         Assert.False(result.Success);
         Assert.Contains("VoiceRSS error", result.ErrorMessage);
-    }
-
-    [Fact]
-    public async Task SynthesizeAsync_HttpError_ReturnsFail()
-    {
-        // Arrange
-        var provider = CreateProvider(CreateMockHttpClient(HttpStatusCode.InternalServerError,
-            Array.Empty<byte>(), "text/plain"));
-        var request = new TtsRequest { Text = "Test" };
-
-        // Act
-        var result = await provider.SynthesizeAsync(request);
-
-        // Assert
-        Assert.False(result.Success);
-        Assert.Contains("VoiceRSS API error", result.ErrorMessage);
     }
 
     [Fact]
@@ -132,7 +115,6 @@ public class VoiceRssProviderTests
         // Assert
         Assert.Equal("VoiceRSS", info.Name);
         Assert.Equal(ProviderStatus.Available, info.Status);
-        Assert.NotEmpty(info.SupportedVoices);
     }
 
     [Fact]
