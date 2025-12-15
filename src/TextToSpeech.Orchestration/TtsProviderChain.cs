@@ -19,6 +19,7 @@ public sealed class TtsProviderChain : ITtsProviderChain
     private readonly ILogger<TtsProviderChain> _logger;
     private readonly ITtsProviderFactory _providerFactory;
     private readonly OrchestrationConfig _config;
+    private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, ProviderState> _providerStates = new();
 
     /// <summary>
@@ -27,16 +28,18 @@ public sealed class TtsProviderChain : ITtsProviderChain
     public TtsProviderChain(
         ILogger<TtsProviderChain> logger,
         ITtsProviderFactory providerFactory,
-        IOptions<OrchestrationConfig> config)
+        IOptions<OrchestrationConfig> config,
+        TimeProvider? timeProvider = null)
     {
         _logger = logger;
         _providerFactory = providerFactory;
         _config = config.Value;
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         // Initialize provider states
         foreach (var providerConfig in _config.Providers.Where(p => p.Enabled))
         {
-            _providerStates[providerConfig.Name] = new ProviderState(providerConfig);
+            _providerStates[providerConfig.Name] = new ProviderState(providerConfig, _timeProvider);
         }
 
         _logger.LogInformation(
@@ -194,13 +197,15 @@ public sealed class TtsProviderChain : ITtsProviderChain
     private sealed class ProviderState
     {
         private readonly ProviderConfig _config;
+        private readonly TimeProvider _timeProvider;
         private int _consecutiveFailures;
         private int _failureMultiplier = 1;
-        private DateTime? _circuitOpenUntil;
+        private DateTimeOffset? _circuitOpenUntil;
 
-        public ProviderState(ProviderConfig config)
+        public ProviderState(ProviderConfig config, TimeProvider timeProvider)
         {
             _config = config;
+            _timeProvider = timeProvider;
         }
 
         public int ConsecutiveFailures => _consecutiveFailures;
@@ -210,12 +215,12 @@ public sealed class TtsProviderChain : ITtsProviderChain
             get
             {
                 if (_circuitOpenUntil == null) return CircuitState.Closed;
-                if (DateTime.UtcNow >= _circuitOpenUntil) return CircuitState.HalfOpen;
+                if (_timeProvider.GetUtcNow() >= _circuitOpenUntil) return CircuitState.HalfOpen;
                 return CircuitState.Open;
             }
         }
 
-        public DateTime? CircuitResetTime => _circuitOpenUntil;
+        public DateTime? CircuitResetTime => _circuitOpenUntil?.UtcDateTime;
 
         public bool IsCircuitOpen => CurrentCircuitState == CircuitState.Open;
 
@@ -244,7 +249,7 @@ public sealed class TtsProviderChain : ITtsProviderChain
                     _failureMultiplier *= 2;
                 }
 
-                _circuitOpenUntil = DateTime.UtcNow + timeout;
+                _circuitOpenUntil = _timeProvider.GetUtcNow() + timeout;
             }
         }
     }
