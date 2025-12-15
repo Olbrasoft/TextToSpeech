@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TextToSpeech.Core", "src\Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TextToSpeech.Providers", "src\TextToSpeech.Providers\TextToSpeech.Providers.csproj", "{9A9C70A0-870A-4F06-8BC1-3CF14CAA1416}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TextToSpeech.Orchestration", "src\TextToSpeech.Orchestration\TextToSpeech.Orchestration.csproj", "{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,18 @@ Global
 		{9A9C70A0-870A-4F06-8BC1-3CF14CAA1416}.Release|x64.Build.0 = Release|Any CPU
 		{9A9C70A0-870A-4F06-8BC1-3CF14CAA1416}.Release|x86.ActiveCfg = Release|Any CPU
 		{9A9C70A0-870A-4F06-8BC1-3CF14CAA1416}.Release|x86.Build.0 = Release|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Debug|x64.Build.0 = Debug|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Debug|x86.Build.0 = Debug|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Release|x64.ActiveCfg = Release|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Release|x64.Build.0 = Release|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Release|x86.ActiveCfg = Release|Any CPU
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -50,5 +64,6 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{4C9D453C-43DE-4137-970E-5D94DD821550} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{9A9C70A0-870A-4F06-8BC1-3CF14CAA1416} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{0EF3DA99-9446-4ED3-86DC-BDD7DC0B90A3} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
