@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Olbrasoft.TextToSpeech.Core;
 using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
 using Olbrasoft.TextToSpeech.Core.Models;
@@ -297,7 +298,7 @@ public sealed class PiperTtsProvider : ITtsProvider
         var directory = _config.OutputDirectory ?? Path.GetTempPath();
         Directory.CreateDirectory(directory);
 
-        var hash = ComputeTextHash(text);
+        var hash = TextHasher.ComputeHash(text);
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{Name}_{timestamp}_{hash}.wav";
         var filePath = Path.Combine(directory, fileName);
@@ -309,13 +310,6 @@ public sealed class PiperTtsProvider : ITtsProvider
         File.Move(tempWavPath, filePath);
 
         return filePath;
-    }
-
-    private static string ComputeTextHash(string text)
-    {
-        var hashBytes = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(text ?? string.Empty));
-        return Convert.ToHexString(hashBytes)[..8];
     }
 
     private static TimeSpan EstimateAudioDuration(byte[] wavBytes)

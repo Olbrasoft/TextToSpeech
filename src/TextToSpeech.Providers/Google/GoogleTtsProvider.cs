@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Olbrasoft.TextToSpeech.Core;
 using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
 using Olbrasoft.TextToSpeech.Core.Models;
@@ -247,7 +248,7 @@ public sealed class GoogleTtsProvider : ITtsProvider
         var directory = _outputConfig.OutputDirectory ?? Path.GetTempPath();
         Directory.CreateDirectory(directory);
 
-        var hash = ComputeTextHash(text);
+        var hash = TextHasher.ComputeHash(text);
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = _outputConfig.FileNamePattern
             .Replace("{provider}", Name, StringComparison.OrdinalIgnoreCase)
@@ -263,13 +264,6 @@ public sealed class GoogleTtsProvider : ITtsProvider
         File.Move(tempFile, filePath);
 
         return filePath;
-    }
-
-    private static string ComputeTextHash(string text)
-    {
-        var hashBytes = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(text ?? string.Empty));
-        return Convert.ToHexString(hashBytes)[..8];
     }
 
     private static TimeSpan EstimateAudioDuration(int audioBytes)

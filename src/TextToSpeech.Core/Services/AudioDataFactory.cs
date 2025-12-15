@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Models;
 
@@ -58,7 +56,7 @@ public sealed class AudioDataFactory : IAudioDataFactory
         var directory = outputDirectory ?? Path.GetTempPath();
         Directory.CreateDirectory(directory);
 
-        var hash = ComputeTextHash(text);
+        var hash = TextHasher.ComputeHash(text);
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
 
         var fileName = fileNamePattern
@@ -67,11 +65,5 @@ public sealed class AudioDataFactory : IAudioDataFactory
             .Replace("{hash}", hash, StringComparison.OrdinalIgnoreCase);
 
         return Path.Combine(directory, fileName);
-    }
-
-    private static string ComputeTextHash(string text)
-    {
-        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(text ?? string.Empty));
-        return Convert.ToHexString(hashBytes)[..8];
     }
 }
