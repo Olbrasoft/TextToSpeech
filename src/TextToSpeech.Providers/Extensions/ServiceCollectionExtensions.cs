@@ -1,8 +1,11 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
+using Olbrasoft.TextToSpeech.Providers.Azure;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 using Olbrasoft.TextToSpeech.Providers.EdgeTTS;
+using Olbrasoft.TextToSpeech.Providers.Google;
+using Olbrasoft.TextToSpeech.Providers.VoiceRss;
 
 namespace Olbrasoft.TextToSpeech.Providers.Extensions;
 
@@ -29,6 +32,15 @@ public static class ServiceCollectionExtensions
         // Add EdgeTTS provider
         services.AddEdgeTtsProvider(configuration);
 
+        // Add Azure TTS provider
+        services.AddAzureTtsProvider(configuration);
+
+        // Add VoiceRSS provider
+        services.AddVoiceRssProvider(configuration);
+
+        // Add Google TTS provider
+        services.AddGoogleTtsProvider(configuration);
+
         // Register factory
         services.AddSingleton<ITtsProviderFactory, TtsProviderFactory>();
 
@@ -53,6 +65,53 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton<ITtsProvider, EdgeTtsProvider>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the Azure Cognitive Services TTS provider.
+    /// </summary>
+    public static IServiceCollection AddAzureTtsProvider(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<AzureTtsConfiguration>(configuration.GetSection(AzureTtsConfiguration.SectionName));
+        services.AddSingleton<ITtsProvider, AzureTtsProvider>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the VoiceRSS TTS provider.
+    /// </summary>
+    public static IServiceCollection AddVoiceRssProvider(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<VoiceRssConfiguration>(configuration.GetSection(VoiceRssConfiguration.SectionName));
+
+        services.AddHttpClient("VoiceRSS", (sp, client) =>
+        {
+            var config = configuration.GetSection(VoiceRssConfiguration.SectionName).Get<VoiceRssConfiguration>()
+                         ?? new VoiceRssConfiguration();
+            client.Timeout = config.Timeout;
+        });
+
+        services.AddSingleton<ITtsProvider, VoiceRssProvider>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the Google TTS (gTTS) provider.
+    /// </summary>
+    public static IServiceCollection AddGoogleTtsProvider(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<GoogleTtsConfiguration>(configuration.GetSection(GoogleTtsConfiguration.SectionName));
+        services.AddSingleton<ITtsProvider, GoogleTtsProvider>();
 
         return services;
     }
