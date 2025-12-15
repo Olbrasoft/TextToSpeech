@@ -1,12 +1,11 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 
 namespace Olbrasoft.TextToSpeech.Providers.Azure;
@@ -20,6 +19,7 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
     private readonly ILogger<AzureTtsProvider> _logger;
     private readonly AzureTtsConfiguration _config;
     private readonly IOutputConfiguration _outputConfig;
+    private readonly IAudioDataFactory _audioDataFactory;
     private readonly string _subscriptionKey;
     private readonly string _region;
     private SpeechConfig? _speechConfig;
@@ -33,11 +33,13 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
     public AzureTtsProvider(
         ILogger<AzureTtsProvider> logger,
         IOptions<AzureTtsConfiguration> config,
-        IOutputConfiguration outputConfig)
+        IOutputConfiguration outputConfig,
+        IAudioDataFactory audioDataFactory)
     {
         _logger = logger;
         _config = config.Value;
         _outputConfig = outputConfig;
+        _audioDataFactory = audioDataFactory;
 
         // Get subscription key from options or environment variable
         _subscriptionKey = !string.IsNullOrEmpty(_config.SubscriptionKey)
@@ -126,7 +128,13 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
                 _logger.LogDebug("Azure TTS generated {Bytes} bytes of audio", audioBytes.Length);
 
                 _lastSuccessTime = DateTime.UtcNow;
-                var audioData = CreateAudioData(audioBytes, request.Text);
+                var audioData = _audioDataFactory.Create(
+                    audioBytes,
+                    request.Text,
+                    Name,
+                    _outputConfig.Mode,
+                    _outputConfig.OutputDirectory,
+                    _outputConfig.FileNamePattern);
 
                 // Estimate audio duration (rough estimate based on MP3 bitrate)
                 var audioDuration = EstimateAudioDuration(audioBytes.Length);
@@ -214,30 +222,6 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
         </prosody>
     </voice>
 </speak>";
-    }
-
-    private AudioData CreateAudioData(byte[] audioBytes, string text)
-    {
-        if (_outputConfig.Mode == AudioOutputMode.Memory)
-        {
-            return new MemoryAudioData { Data = audioBytes };
-        }
-
-        // File mode
-        var directory = _outputConfig.OutputDirectory ?? Path.GetTempPath();
-        Directory.CreateDirectory(directory);
-
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..8];
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        var fileName = _outputConfig.FileNamePattern
-            .Replace("{provider}", Name)
-            .Replace("{timestamp}", timestamp)
-            .Replace("{hash}", hash);
-
-        var filePath = Path.Combine(directory, fileName);
-        File.WriteAllBytes(filePath, audioBytes);
-
-        return new FileAudioData { FilePath = filePath };
     }
 
     private static TimeSpan EstimateAudioDuration(int audioBytes)

@@ -2,7 +2,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
+using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 using Olbrasoft.TextToSpeech.Providers.EdgeTTS;
 using System.Net;
@@ -14,6 +16,7 @@ public class EdgeTtsProviderTests
 {
     private readonly Mock<ILogger<EdgeTtsProvider>> _loggerMock;
     private readonly Mock<IOutputConfiguration> _outputConfigMock;
+    private readonly Mock<IAudioDataFactory> _audioDataFactoryMock;
     private readonly EdgeTtsConfiguration _config;
 
     public EdgeTtsProviderTests()
@@ -21,6 +24,20 @@ public class EdgeTtsProviderTests
         _loggerMock = new Mock<ILogger<EdgeTtsProvider>>();
         _outputConfigMock = new Mock<IOutputConfiguration>();
         _outputConfigMock.Setup(x => x.Mode).Returns(AudioOutputMode.Memory);
+
+        _audioDataFactoryMock = new Mock<IAudioDataFactory>();
+        _audioDataFactoryMock
+            .Setup(x => x.Create(
+                It.IsAny<byte[]>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<AudioOutputMode>(),
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<string>()))
+            .Returns((byte[] bytes, string text, string provider, AudioOutputMode mode, string? dir, string pattern, string? existing, string contentType) =>
+                new MemoryAudioData { Data = bytes, ContentType = contentType });
 
         _config = new EdgeTtsConfiguration
         {
@@ -104,7 +121,8 @@ public class EdgeTtsProviderTests
             _loggerMock.Object,
             httpClientFactoryMock.Object,
             Options.Create(_config),
-            _outputConfigMock.Object);
+            _outputConfigMock.Object,
+            _audioDataFactoryMock.Object);
 
         var request = new TtsRequest { Text = "Test" };
 
@@ -140,7 +158,8 @@ public class EdgeTtsProviderTests
             _loggerMock.Object,
             httpClientFactoryMock.Object,
             Options.Create(_config),
-            _outputConfigMock.Object);
+            _outputConfigMock.Object,
+            _audioDataFactoryMock.Object);
     }
 
     private HttpClient CreateMockHttpClient(HttpStatusCode statusCode, string content)

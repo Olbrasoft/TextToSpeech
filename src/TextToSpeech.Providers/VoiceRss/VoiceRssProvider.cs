@@ -1,10 +1,9 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 
 namespace Olbrasoft.TextToSpeech.Providers.VoiceRss;
@@ -21,6 +20,7 @@ public sealed class VoiceRssProvider : ITtsProvider
     private readonly HttpClient _httpClient;
     private readonly VoiceRssConfiguration _config;
     private readonly IOutputConfiguration _outputConfig;
+    private readonly IAudioDataFactory _audioDataFactory;
     private readonly string? _apiKey;
     private DateTime? _lastSuccessTime;
 
@@ -31,12 +31,14 @@ public sealed class VoiceRssProvider : ITtsProvider
         ILogger<VoiceRssProvider> logger,
         IHttpClientFactory httpClientFactory,
         IOptions<VoiceRssConfiguration> config,
-        IOutputConfiguration outputConfig)
+        IOutputConfiguration outputConfig,
+        IAudioDataFactory audioDataFactory)
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("VoiceRSS");
         _config = config.Value;
         _outputConfig = outputConfig;
+        _audioDataFactory = audioDataFactory;
         _apiKey = LoadApiKey();
     }
 
@@ -114,7 +116,16 @@ public sealed class VoiceRssProvider : ITtsProvider
             }
 
             _lastSuccessTime = DateTime.UtcNow;
-            var audioData = CreateAudioData(audioBytes, request.Text);
+
+            var audioContentType = GetContentType(_config.AudioCodec);
+            var audioData = _audioDataFactory.Create(
+                audioBytes,
+                request.Text,
+                Name,
+                _outputConfig.Mode,
+                _outputConfig.OutputDirectory,
+                _outputConfig.FileNamePattern,
+                contentType: audioContentType);
 
             // Estimate audio duration
             var audioDuration = EstimateAudioDuration(audioBytes.Length);
@@ -225,45 +236,15 @@ public sealed class VoiceRssProvider : ITtsProvider
         return null;
     }
 
-    private AudioData CreateAudioData(byte[] audioBytes, string text)
-    {
-        if (_outputConfig.Mode == AudioOutputMode.Memory)
+    private static string GetContentType(string audioCodec) =>
+        audioCodec.ToUpperInvariant() switch
         {
-            var contentType = _config.AudioCodec.ToUpperInvariant() switch
-            {
-                "MP3" => "audio/mpeg",
-                "WAV" => "audio/wav",
-                "OGG" => "audio/ogg",
-                "AAC" => "audio/aac",
-                _ => "audio/mpeg"
-            };
-            return new MemoryAudioData { Data = audioBytes, ContentType = contentType };
-        }
-
-        // File mode
-        var directory = _outputConfig.OutputDirectory ?? Path.GetTempPath();
-        Directory.CreateDirectory(directory);
-
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..8];
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-
-        var extension = _config.AudioCodec.ToLowerInvariant();
-        var fileName = _outputConfig.FileNamePattern
-            .Replace("{provider}", Name)
-            .Replace("{timestamp}", timestamp)
-            .Replace("{hash}", hash);
-
-        // Fix extension if needed
-        if (!fileName.EndsWith($".{extension}", StringComparison.OrdinalIgnoreCase))
-        {
-            fileName = Path.ChangeExtension(fileName, extension);
-        }
-
-        var filePath = Path.Combine(directory, fileName);
-        File.WriteAllBytes(filePath, audioBytes);
-
-        return new FileAudioData { FilePath = filePath };
-    }
+            "MP3" => "audio/mpeg",
+            "WAV" => "audio/wav",
+            "OGG" => "audio/ogg",
+            "AAC" => "audio/aac",
+            _ => "audio/mpeg"
+        };
 
     private static TimeSpan EstimateAudioDuration(int audioBytes)
     {

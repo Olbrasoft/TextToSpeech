@@ -1,11 +1,11 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 
 namespace Olbrasoft.TextToSpeech.Providers.EdgeTTS;
@@ -20,6 +20,7 @@ public sealed class EdgeTtsProvider : ITtsProvider
     private readonly HttpClient _httpClient;
     private readonly EdgeTtsConfiguration _config;
     private readonly IOutputConfiguration _outputConfig;
+    private readonly IAudioDataFactory _audioDataFactory;
     private DateTime? _lastSuccessTime;
 
     /// <summary>
@@ -29,12 +30,14 @@ public sealed class EdgeTtsProvider : ITtsProvider
         ILogger<EdgeTtsProvider> logger,
         IHttpClientFactory httpClientFactory,
         IOptions<EdgeTtsConfiguration> config,
-        IOutputConfiguration outputConfig)
+        IOutputConfiguration outputConfig,
+        IAudioDataFactory audioDataFactory)
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("EdgeTtsServer");
         _config = config.Value;
         _outputConfig = outputConfig;
+        _audioDataFactory = audioDataFactory;
     }
 
     /// <inheritdoc />
@@ -102,7 +105,13 @@ public sealed class EdgeTtsProvider : ITtsProvider
                         var audioBytes = await File.ReadAllBytesAsync(audioPath, cancellationToken);
 
                         _lastSuccessTime = DateTime.UtcNow;
-                        var audioData = CreateAudioData(audioBytes, request.Text);
+                        var audioData = _audioDataFactory.Create(
+                            audioBytes,
+                            request.Text,
+                            Name,
+                            _outputConfig.Mode,
+                            _outputConfig.OutputDirectory,
+                            _outputConfig.FileNamePattern);
 
                         return TtsResult.Ok(audioData, Name, stopwatch.Elapsed);
                     }
@@ -155,28 +164,4 @@ public sealed class EdgeTtsProvider : ITtsProvider
     /// </summary>
     private static string FormatPitch(int pitch) =>
         pitch >= 0 ? $"+{pitch}Hz" : $"{pitch}Hz";
-
-    private AudioData CreateAudioData(byte[] audioBytes, string text)
-    {
-        if (_outputConfig.Mode == AudioOutputMode.Memory)
-        {
-            return new MemoryAudioData { Data = audioBytes };
-        }
-
-        // File mode
-        var directory = _outputConfig.OutputDirectory ?? Path.GetTempPath();
-        Directory.CreateDirectory(directory);
-
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..8];
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        var fileName = _outputConfig.FileNamePattern
-            .Replace("{provider}", Name)
-            .Replace("{timestamp}", timestamp)
-            .Replace("{hash}", hash);
-
-        var filePath = Path.Combine(directory, fileName);
-        File.WriteAllBytes(filePath, audioBytes);
-
-        return new FileAudioData { FilePath = filePath };
-    }
 }

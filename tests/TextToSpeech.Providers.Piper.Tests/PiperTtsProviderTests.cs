@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Piper;
 
 namespace TextToSpeech.Providers.Piper.Tests;
@@ -9,11 +11,13 @@ namespace TextToSpeech.Providers.Piper.Tests;
 public class PiperTtsProviderTests
 {
     private readonly Mock<ILogger<PiperTtsProvider>> _loggerMock;
+    private readonly Mock<IAudioDataFactory> _audioDataFactoryMock;
     private readonly PiperConfiguration _config;
 
     public PiperTtsProviderTests()
     {
         _loggerMock = new Mock<ILogger<PiperTtsProvider>>();
+        _audioDataFactoryMock = new Mock<IAudioDataFactory>();
 
         _config = new PiperConfiguration
         {
@@ -109,6 +113,7 @@ public class PiperTtsProviderTests
     {
         return new PiperTtsProvider(
             _loggerMock.Object,
-            Options.Create(_config));
+            Options.Create(_config),
+            _audioDataFactoryMock.Object);
     }
 }

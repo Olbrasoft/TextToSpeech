@@ -1,3 +1,5 @@
+using Olbrasoft.TextToSpeech.Core.Enums;
+
 namespace Olbrasoft.TextToSpeech.Providers.Configuration;
 
 /// <summary>

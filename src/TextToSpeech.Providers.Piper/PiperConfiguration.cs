@@ -1,3 +1,5 @@
+using Olbrasoft.TextToSpeech.Core.Enums;
+
 namespace Olbrasoft.TextToSpeech.Providers.Piper;
 
 /// <summary>
@@ -91,18 +93,3 @@ public sealed class PiperVoiceProfile
     public int Speaker { get; set; } = 0;
 }
 
-/// <summary>
-/// Audio output mode.
-/// </summary>
-public enum AudioOutputMode
-{
-    /// <summary>
-    /// Return audio data in memory.
-    /// </summary>
-    Memory,
-
-    /// <summary>
-    /// Save audio to file and return file path.
-    /// </summary>
-    File
-}

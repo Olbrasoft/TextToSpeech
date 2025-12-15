@@ -1,3 +1,4 @@
+using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Providers.Piper;
 
 namespace TextToSpeech.Providers.Piper.Tests;

@@ -1,10 +1,10 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 
 namespace Olbrasoft.TextToSpeech.Providers.Google;
@@ -19,6 +19,7 @@ public sealed class GoogleTtsProvider : ITtsProvider
     private readonly ILogger<GoogleTtsProvider> _logger;
     private readonly GoogleTtsConfiguration _config;
     private readonly IOutputConfiguration _outputConfig;
+    private readonly IAudioDataFactory _audioDataFactory;
     private DateTime? _lastSuccessTime;
     private bool? _isGttsInstalled;
 
@@ -28,11 +29,13 @@ public sealed class GoogleTtsProvider : ITtsProvider
     public GoogleTtsProvider(
         ILogger<GoogleTtsProvider> logger,
         IOptions<GoogleTtsConfiguration> config,
-        IOutputConfiguration outputConfig)
+        IOutputConfiguration outputConfig,
+        IAudioDataFactory audioDataFactory)
     {
         _logger = logger;
         _config = config.Value;
         _outputConfig = outputConfig;
+        _audioDataFactory = audioDataFactory;
     }
 
     /// <inheritdoc />
@@ -136,7 +139,23 @@ public sealed class GoogleTtsProvider : ITtsProvider
             }
 
             _lastSuccessTime = DateTime.UtcNow;
-            var audioData = CreateAudioData(audioBytes, request.Text, tempFile);
+
+            // If file mode, handle the temp file appropriately
+            string? existingFilePath = null;
+            if (_outputConfig.Mode == AudioOutputMode.File)
+            {
+                // Move temp file to output directory
+                existingFilePath = MoveToOutputDirectory(tempFile, request.Text);
+            }
+
+            var audioData = _audioDataFactory.Create(
+                audioBytes,
+                request.Text,
+                Name,
+                _outputConfig.Mode,
+                _outputConfig.OutputDirectory,
+                _outputConfig.FileNamePattern,
+                existingFilePath);
 
             // Estimate audio duration
             var audioDuration = EstimateAudioDuration(audioBytes.Length);
@@ -223,34 +242,34 @@ public sealed class GoogleTtsProvider : ITtsProvider
         }
     }
 
-    private AudioData CreateAudioData(byte[] audioBytes, string text, string tempFile)
+    private string MoveToOutputDirectory(string tempFile, string text)
     {
-        if (_outputConfig.Mode == AudioOutputMode.Memory)
-        {
-            return new MemoryAudioData { Data = audioBytes, ContentType = "audio/mpeg" };
-        }
-
-        // File mode - move temp file to output directory
         var directory = _outputConfig.OutputDirectory ?? Path.GetTempPath();
         Directory.CreateDirectory(directory);
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..8];
+        var hash = ComputeTextHash(text);
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = _outputConfig.FileNamePattern
-            .Replace("{provider}", Name)
-            .Replace("{timestamp}", timestamp)
-            .Replace("{hash}", hash);
+            .Replace("{provider}", Name, StringComparison.OrdinalIgnoreCase)
+            .Replace("{timestamp}", timestamp, StringComparison.OrdinalIgnoreCase)
+            .Replace("{hash}", hash, StringComparison.OrdinalIgnoreCase);
 
         var filePath = Path.Combine(directory, fileName);
 
-        // Move temp file to destination
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
         }
         File.Move(tempFile, filePath);
 
-        return new FileAudioData { FilePath = filePath };
+        return filePath;
+    }
+
+    private static string ComputeTextHash(string text)
+    {
+        var hashBytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(text ?? string.Empty));
+        return Convert.ToHexString(hashBytes)[..8];
     }
 
     private static TimeSpan EstimateAudioDuration(int audioBytes)

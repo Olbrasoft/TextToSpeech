@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Azure;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 using Olbrasoft.TextToSpeech.Providers.EdgeTTS;
@@ -28,6 +29,9 @@ public static class ServiceCollectionExtensions
         services.Configure<OutputConfiguration>(configuration.GetSection(OutputConfiguration.SectionName));
         services.AddSingleton<IOutputConfiguration>(sp =>
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<OutputConfiguration>>().Value);
+
+        // Register audio data factory
+        services.AddSingleton<IAudioDataFactory, AudioDataFactory>();
 
         // Add EdgeTTS provider
         services.AddEdgeTtsProvider(configuration);

@@ -1,3 +1,5 @@
+using Olbrasoft.TextToSpeech.Core.Enums;
+
 namespace Olbrasoft.TextToSpeech.Providers.Configuration;
 
 /// <summary>
@@ -20,20 +22,4 @@ public interface IOutputConfiguration
     /// Supports placeholders: {provider}, {timestamp}, {hash}
     /// </summary>
     string FileNamePattern { get; }
-}
-
-/// <summary>
-/// Specifies how synthesized audio should be stored.
-/// </summary>
-public enum AudioOutputMode
-{
-    /// <summary>
-    /// Audio is returned in memory as byte array. Fast, no disk I/O.
-    /// </summary>
-    Memory,
-
-    /// <summary>
-    /// Audio is saved to disk. Better for caching and debugging.
-    /// </summary>
-    File
 }

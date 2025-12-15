@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
 using Olbrasoft.TextToSpeech.Providers.Google;
 
@@ -11,6 +13,7 @@ public class GoogleTtsProviderTests
 {
     private readonly Mock<ILogger<GoogleTtsProvider>> _loggerMock;
     private readonly Mock<IOutputConfiguration> _outputConfigMock;
+    private readonly Mock<IAudioDataFactory> _audioDataFactoryMock;
     private readonly GoogleTtsConfiguration _config;
 
     public GoogleTtsProviderTests()
@@ -18,6 +21,20 @@ public class GoogleTtsProviderTests
         _loggerMock = new Mock<ILogger<GoogleTtsProvider>>();
         _outputConfigMock = new Mock<IOutputConfiguration>();
         _outputConfigMock.Setup(x => x.Mode).Returns(AudioOutputMode.Memory);
+
+        _audioDataFactoryMock = new Mock<IAudioDataFactory>();
+        _audioDataFactoryMock
+            .Setup(x => x.Create(
+                It.IsAny<byte[]>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<AudioOutputMode>(),
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<string>()))
+            .Returns((byte[] bytes, string text, string provider, AudioOutputMode mode, string? dir, string pattern, string? existing, string contentType) =>
+                new MemoryAudioData { Data = bytes, ContentType = contentType });
 
         _config = new GoogleTtsConfiguration
         {
@@ -69,7 +86,8 @@ public class GoogleTtsProviderTests
         var provider = new GoogleTtsProvider(
             _loggerMock.Object,
             Options.Create(invalidConfig),
-            _outputConfigMock.Object);
+            _outputConfigMock.Object,
+            _audioDataFactoryMock.Object);
 
         var request = new TtsRequest { Text = "Test" };
 
@@ -113,6 +131,7 @@ public class GoogleTtsProviderTests
         return new GoogleTtsProvider(
             _loggerMock.Object,
             Options.Create(_config),
-            _outputConfigMock.Object);
+            _outputConfigMock.Object,
+            _audioDataFactoryMock.Object);
     }
 }

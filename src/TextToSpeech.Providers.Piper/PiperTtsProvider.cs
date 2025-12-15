@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Olbrasoft.TextToSpeech.Core.Enums;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
 using Olbrasoft.TextToSpeech.Core.Models;
+using Olbrasoft.TextToSpeech.Core.Services;
 
 namespace Olbrasoft.TextToSpeech.Providers.Piper;
 
@@ -18,6 +18,7 @@ public sealed class PiperTtsProvider : ITtsProvider
 {
     private readonly ILogger<PiperTtsProvider> _logger;
     private readonly PiperConfiguration _config;
+    private readonly IAudioDataFactory _audioDataFactory;
     private bool? _isPiperInstalled;
     private DateTime? _lastSuccessTime;
 
@@ -26,10 +27,12 @@ public sealed class PiperTtsProvider : ITtsProvider
     /// </summary>
     public PiperTtsProvider(
         ILogger<PiperTtsProvider> logger,
-        IOptions<PiperConfiguration> config)
+        IOptions<PiperConfiguration> config,
+        IAudioDataFactory audioDataFactory)
     {
         _logger = logger;
         _config = config.Value;
+        _audioDataFactory = audioDataFactory;
     }
 
     /// <inheritdoc />
@@ -157,7 +160,23 @@ public sealed class PiperTtsProvider : ITtsProvider
             }
 
             _lastSuccessTime = DateTime.UtcNow;
-            var audioData = CreateAudioData(audioBytes, request.Text, tempWav);
+
+            // If file mode, move temp file to output directory
+            string? existingFilePath = null;
+            if (_config.OutputMode == AudioOutputMode.File)
+            {
+                existingFilePath = MoveToOutputDirectory(tempWav, request.Text);
+            }
+
+            var audioData = _audioDataFactory.Create(
+                audioBytes,
+                request.Text,
+                Name,
+                _config.OutputMode,
+                _config.OutputDirectory,
+                "{provider}_{timestamp}_{hash}.wav",
+                existingFilePath,
+                contentType: "audio/wav");
 
             // Estimate audio duration from WAV header (if present)
             var audioDuration = EstimateAudioDuration(audioBytes);
@@ -273,30 +292,30 @@ public sealed class PiperTtsProvider : ITtsProvider
         return voices;
     }
 
-    private AudioData CreateAudioData(byte[] audioBytes, string text, string tempWavPath)
+    private string MoveToOutputDirectory(string tempWavPath, string text)
     {
-        if (_config.OutputMode == AudioOutputMode.Memory)
-        {
-            return new MemoryAudioData { Data = audioBytes, ContentType = "audio/wav" };
-        }
-
-        // File mode - move temp file to output directory
         var directory = _config.OutputDirectory ?? Path.GetTempPath();
         Directory.CreateDirectory(directory);
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..8];
+        var hash = ComputeTextHash(text);
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{Name}_{timestamp}_{hash}.wav";
         var filePath = Path.Combine(directory, fileName);
 
-        // Move temp file to destination
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
         }
         File.Move(tempWavPath, filePath);
 
-        return new FileAudioData { FilePath = filePath, ContentType = "audio/wav" };
+        return filePath;
+    }
+
+    private static string ComputeTextHash(string text)
+    {
+        var hashBytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(text ?? string.Empty));
+        return Convert.ToHexString(hashBytes)[..8];
     }
 
     private static TimeSpan EstimateAudioDuration(byte[] wavBytes)

@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Olbrasoft.TextToSpeech.Core.Interfaces;
+using Olbrasoft.TextToSpeech.Core.Services;
 
 namespace Olbrasoft.TextToSpeech.Providers.Piper.Extensions;
 
@@ -21,6 +23,10 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration)
     {
         services.Configure<PiperConfiguration>(configuration.GetSection(PiperConfiguration.SectionName));
+
+        // Register audio data factory if not already registered
+        services.TryAddSingleton<IAudioDataFactory, AudioDataFactory>();
+
         services.AddSingleton<ITtsProvider, PiperTtsProvider>();
 
         return services;
@@ -37,6 +43,10 @@ public static class ServiceCollectionExtensions
         Action<PiperConfiguration> configure)
     {
         services.Configure(configure);
+
+        // Register audio data factory if not already registered
+        services.TryAddSingleton<IAudioDataFactory, AudioDataFactory>();
+
         services.AddSingleton<ITtsProvider, PiperTtsProvider>();
 
         return services;
