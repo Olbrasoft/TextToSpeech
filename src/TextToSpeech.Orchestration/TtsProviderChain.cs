@@ -193,11 +193,13 @@ public sealed class TtsProviderChain : ITtsProviderChain
 
     /// <summary>
     /// Tracks circuit breaker state for a single provider.
+    /// Thread-safe implementation using lock for state synchronization.
     /// </summary>
     private sealed class ProviderState
     {
         private readonly ProviderConfig _config;
         private readonly TimeProvider _timeProvider;
+        private readonly object _lock = new();
         private int _consecutiveFailures;
         private int _failureMultiplier = 1;
         private DateTimeOffset? _circuitOpenUntil;
@@ -208,48 +210,75 @@ public sealed class TtsProviderChain : ITtsProviderChain
             _timeProvider = timeProvider;
         }
 
-        public int ConsecutiveFailures => _consecutiveFailures;
+        public int ConsecutiveFailures
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _consecutiveFailures;
+                }
+            }
+        }
 
         public CircuitState CurrentCircuitState
         {
             get
             {
-                if (_circuitOpenUntil == null) return CircuitState.Closed;
-                if (_timeProvider.GetUtcNow() >= _circuitOpenUntil) return CircuitState.HalfOpen;
-                return CircuitState.Open;
+                lock (_lock)
+                {
+                    if (_circuitOpenUntil == null) return CircuitState.Closed;
+                    if (_timeProvider.GetUtcNow() >= _circuitOpenUntil) return CircuitState.HalfOpen;
+                    return CircuitState.Open;
+                }
             }
         }
 
-        public DateTime? CircuitResetTime => _circuitOpenUntil?.UtcDateTime;
+        public DateTime? CircuitResetTime
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _circuitOpenUntil?.UtcDateTime;
+                }
+            }
+        }
 
         public bool IsCircuitOpen => CurrentCircuitState == CircuitState.Open;
 
         public void RecordSuccess()
         {
-            _consecutiveFailures = 0;
-            _failureMultiplier = 1;
-            _circuitOpenUntil = null;
+            lock (_lock)
+            {
+                _consecutiveFailures = 0;
+                _failureMultiplier = 1;
+                _circuitOpenUntil = null;
+            }
         }
 
         public void RecordFailure()
         {
-            _consecutiveFailures++;
-
-            if (_consecutiveFailures >= _config.CircuitBreaker.FailureThreshold)
+            lock (_lock)
             {
-                // Open circuit
-                var timeout = _config.CircuitBreaker.ResetTimeout;
+                _consecutiveFailures++;
 
-                if (_config.CircuitBreaker.UseExponentialBackoff)
+                if (_consecutiveFailures >= _config.CircuitBreaker.FailureThreshold)
                 {
-                    timeout = TimeSpan.FromTicks(
-                        Math.Min(
-                            timeout.Ticks * _failureMultiplier,
-                            _config.CircuitBreaker.MaxResetTimeout.Ticks));
-                    _failureMultiplier *= 2;
-                }
+                    // Open circuit
+                    var timeout = _config.CircuitBreaker.ResetTimeout;
 
-                _circuitOpenUntil = _timeProvider.GetUtcNow() + timeout;
+                    if (_config.CircuitBreaker.UseExponentialBackoff)
+                    {
+                        timeout = TimeSpan.FromTicks(
+                            Math.Min(
+                                timeout.Ticks * _failureMultiplier,
+                                _config.CircuitBreaker.MaxResetTimeout.Ticks));
+                        _failureMultiplier *= 2;
+                    }
+
+                    _circuitOpenUntil = _timeProvider.GetUtcNow() + timeout;
+                }
             }
         }
     }
