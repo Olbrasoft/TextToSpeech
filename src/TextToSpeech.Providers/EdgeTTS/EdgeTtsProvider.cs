@@ -53,10 +53,11 @@ public sealed class EdgeTtsProvider : ITtsProvider
             var httpRequest = new
             {
                 text = request.Text,
-                voice = request.Voice ?? _config.DefaultVoice,
-                rate = FormatRate(request.Rate),
-                volume = "+0%",
-                pitch = FormatPitch(request.Pitch),
+                voice = !string.IsNullOrEmpty(request.Voice) ? request.Voice : _config.Voice,
+                rate = request.Rate != 0 ? FormatRate(request.Rate) : _config.Rate,
+                volume = _config.Volume,
+                pitch = request.Pitch != 0 ? FormatPitch(request.Pitch) : _config.Pitch,
+                outputFormat = _config.OutputFormat,
                 play = false  // Don't play on server, return audio file path
             };
 

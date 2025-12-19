@@ -42,7 +42,7 @@ public class EdgeTtsProviderTests
         _config = new EdgeTtsConfiguration
         {
             BaseUrl = "http://localhost:5555",
-            DefaultVoice = "cs-CZ-AntoninNeural",
+            Voice = "cs-CZ-AntoninNeural",
             Timeout = TimeSpan.FromSeconds(30)
         };
     }

@@ -28,12 +28,26 @@ public sealed class VoiceRssConfiguration
     public string Language { get; set; } = "cs-cz";
 
     /// <summary>
-    /// Default voice name (e.g., "Josef" for Czech male voice).
+    /// Voice name (e.g., "Josef" for Czech male voice).
     /// </summary>
-    public string DefaultVoice { get; set; } = "Josef";
+    public string Voice { get; set; } = "Josef";
 
     /// <summary>
-    /// Default speech speed (-10 to 10, 0 is normal). Positive = faster.
+    /// Speech rate (e.g., "+0%", "+10%", "-5%").
+    /// VoiceRSS uses Speed parameter internally (-10 to 10).
+    /// Default: +0%
+    /// </summary>
+    public string Rate { get; set; } = "+0%";
+
+    /// <summary>
+    /// Volume (not supported by VoiceRSS, kept for consistency).
+    /// Default: +0%
+    /// </summary>
+    public string Volume { get; set; } = "+0%";
+
+    /// <summary>
+    /// Speech speed (-10 to 10, 0 is normal). Positive = faster.
+    /// This is the native VoiceRSS parameter.
     /// </summary>
     public int Speed { get; set; } = 0;
 

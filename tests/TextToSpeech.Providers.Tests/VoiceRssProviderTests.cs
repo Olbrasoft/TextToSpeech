@@ -42,7 +42,7 @@ public class VoiceRssProviderTests
         {
             ApiKey = "test-api-key-32-characters-ok!",
             Language = "cs-cz",
-            DefaultVoice = "Josef",
+            Voice = "Josef",
             AudioCodec = "MP3"
         };
     }

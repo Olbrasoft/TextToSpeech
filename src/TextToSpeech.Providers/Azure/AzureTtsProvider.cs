@@ -61,8 +61,8 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
                 _speechConfig = SpeechConfig.FromSubscription(_subscriptionKey, _region);
 
                 // Get voice from options or environment variable
-                var voice = !string.IsNullOrEmpty(_config.DefaultVoice)
-                    ? _config.DefaultVoice
+                var voice = !string.IsNullOrEmpty(_config.Voice)
+                    ? _config.Voice
                     : Environment.GetEnvironmentVariable("AZURE_SPEECH_VOICE") ?? "cs-CZ-AntoninNeural";
 
                 _speechConfig.SpeechSynthesisVoiceName = voice;
@@ -195,22 +195,26 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
 
     /// <summary>
     /// Creates SSML markup with voice configuration.
+    /// Uses configuration values as defaults if request doesn't specify them.
     /// </summary>
     private string CreateSsml(TtsRequest request)
     {
-        // Convert rate from -100/+100 to SSML format
-        var rate = request.Rate == 0 ? "default" : $"{request.Rate:+#;-#;0}%";
+        // Use request rate/pitch if specified, otherwise use config
+        var rate = request.Rate != 0
+            ? $"{request.Rate:+#;-#;0}%"
+            : (!string.IsNullOrEmpty(_config.Rate) ? _config.Rate : "default");
 
-        // Convert pitch from -100/+100 to SSML format (using Hz)
-        var pitch = request.Pitch == 0 ? "default" : $"{request.Pitch:+#;-#;0}Hz";
+        var pitch = request.Pitch != 0
+            ? $"{request.Pitch:+#;-#;0}Hz"
+            : (!string.IsNullOrEmpty(_config.Pitch) ? _config.Pitch : "default");
 
         // Escape XML special characters in text
         var escapedText = System.Security.SecurityElement.Escape(request.Text) ?? request.Text;
 
-        // Get voice from request or use default
+        // Get voice from request or use config/default
         var voice = !string.IsNullOrEmpty(request.Voice)
             ? request.Voice
-            : _speechConfig?.SpeechSynthesisVoiceName ?? "cs-CZ-AntoninNeural";
+            : _speechConfig?.SpeechSynthesisVoiceName ?? _config.Voice;
 
         // Determine language from voice name
         var lang = voice.Split('-').Length >= 2 ? $"{voice.Split('-')[0]}-{voice.Split('-')[1]}" : "cs-CZ";

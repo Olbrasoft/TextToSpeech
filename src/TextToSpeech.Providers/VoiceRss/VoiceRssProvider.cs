@@ -72,7 +72,7 @@ public sealed class VoiceRssProvider : ITtsProvider
             {
                 ["key"] = _apiKey,
                 ["hl"] = _config.Language,
-                ["v"] = request.Voice ?? _config.DefaultVoice,
+                ["v"] = !string.IsNullOrEmpty(request.Voice) ? request.Voice : _config.Voice,
                 ["src"] = request.Text,
                 ["c"] = _config.AudioCodec,
                 ["f"] = _config.AudioFormat,
