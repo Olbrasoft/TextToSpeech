@@ -241,6 +241,7 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
             "Audio24Khz48KBitRateMonoMp3" => SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3,
             "Audio24Khz96KBitRateMonoMp3" => SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3,
             "Audio48Khz96KBitRateMonoMp3" => SpeechSynthesisOutputFormat.Audio48Khz96KBitRateMonoMp3,
+            "Audio48Khz192KBitRateMonoMp3" => SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3,
             "Riff16Khz16BitMonoPcm" => SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm,
             "Riff24Khz16BitMonoPcm" => SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm,
             _ => SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3
