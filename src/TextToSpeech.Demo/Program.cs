@@ -1,3 +1,5 @@
+extern alias EdgeTtsWebSocket;
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,7 +10,6 @@ using Olbrasoft.TextToSpeech.Orchestration.Configuration;
 using Olbrasoft.TextToSpeech.Orchestration.Extensions;
 using Olbrasoft.TextToSpeech.Providers.Azure;
 using Olbrasoft.TextToSpeech.Providers.Configuration;
-using Olbrasoft.TextToSpeech.Providers.EdgeTTS;
 using Olbrasoft.TextToSpeech.Providers.Extensions;
 using Olbrasoft.TextToSpeech.Providers.Google;
 using Olbrasoft.TextToSpeech.Providers.Piper;
@@ -44,7 +45,7 @@ class Program
             Console.WriteLine();
             Console.WriteLine("Select TTS Provider:");
             Console.WriteLine("1. Azure Cognitive Services TTS (requires API key)");
-            Console.WriteLine("2. EdgeTTS (HTTP) (requires EdgeTTS server running)");
+            Console.WriteLine("2. EdgeTTS (WebSocket) (free, no key required)");
             Console.WriteLine("3. VoiceRSS (requires API key)");
             Console.WriteLine("4. Google TTS (gTTS) (free, no key required)");
             Console.WriteLine("5. Piper (local ONNX) (requires model file)");
@@ -52,7 +53,7 @@ class Program
             Console.WriteLine("0. Exit");
             Console.WriteLine();
             Console.WriteLine("Note: Some providers require API keys or external services.");
-            Console.WriteLine("      Option 4 (Google TTS) should work without configuration.");
+            Console.WriteLine("      Options 2 and 4 (EdgeTTS, Google TTS) work without configuration.");
             Console.WriteLine("      Option 6 demonstrates automatic fallback mechanism.");
             Console.WriteLine();
             Console.Write("Your choice: ");
@@ -76,7 +77,7 @@ class Program
                 ITtsProvider? provider = choice switch
                 {
                     "1" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "AzureTTS"),
-                    "2" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "EdgeTTS-HTTP"),
+                    "2" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "EdgeTTS-WebSocket"),
                     "3" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "VoiceRSS"),
                     "4" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "GoogleTTS"),
                     "5" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "Piper"),
@@ -102,6 +103,7 @@ class Program
 
         // Step 2: Register TTS provider services (library only registers, doesn't configure)
         services.AddTtsProviders(configuration);
+        services.AddSingleton<ITtsProvider, EdgeTtsWebSocket::Olbrasoft.TextToSpeech.Providers.EdgeTTS.EdgeTtsProvider>();
         services.AddPiperTts(configuration);
         services.AddTtsOrchestration(configuration);
     }
@@ -127,9 +129,9 @@ class Program
             // NOTE: Key is intentionally empty in appsettings.json to demo fallback!
         });
 
-        // EdgeTTS configuration
-        services.Configure<EdgeTtsConfiguration>(
-            configuration.GetSection(EdgeTtsConfiguration.SectionName));
+        // EdgeTTS WebSocket configuration
+        services.Configure<EdgeTtsWebSocket::Olbrasoft.TextToSpeech.Providers.EdgeTTS.EdgeTtsConfiguration>(
+            configuration.GetSection(EdgeTtsWebSocket::Olbrasoft.TextToSpeech.Providers.EdgeTTS.EdgeTtsConfiguration.SectionName));
 
         // VoiceRSS configuration
         services.Configure<VoiceRssConfiguration>(options =>
@@ -206,6 +208,11 @@ class Program
                 Console.WriteLine($"Audio Size: {memoryData.Data.Length:N0} bytes");
                 Console.WriteLine($"Content Type: {memoryData.ContentType}");
                 Console.WriteLine($"✓ Audio generated in memory!");
+
+                // Save to temporary file for playback
+                var tempFile = Path.Combine(Path.GetTempPath(), $"tts-demo-{DateTime.Now:yyyyMMdd-HHmmss}.mp3");
+                File.WriteAllBytes(tempFile, memoryData.Data);
+                audioFilePath = tempFile;
             }
 
             if (result.AudioDuration.HasValue)
@@ -238,7 +245,7 @@ class Program
         Console.WriteLine();
         Console.WriteLine("⚠️  FALLBACK DEMO:");
         Console.WriteLine("   Azure TTS has NO API KEY in configuration.");
-        Console.WriteLine("   Orchestration will automatically fallback to EdgeTTS!");
+        Console.WriteLine("   Orchestration will automatically fallback to EdgeTTS WebSocket!");
         Console.WriteLine();
 
         // Generate test text with current date/time (proves it's not a recording)
@@ -283,6 +290,11 @@ class Program
                 Console.WriteLine($"Audio Size: {memoryData.Data.Length:N0} bytes");
                 Console.WriteLine($"Content Type: {memoryData.ContentType}");
                 Console.WriteLine($"✓ Audio generated in memory!");
+
+                // Save to temporary file for playback
+                var tempFile = Path.Combine(Path.GetTempPath(), $"tts-demo-{DateTime.Now:yyyyMMdd-HHmmss}.mp3");
+                File.WriteAllBytes(tempFile, memoryData.Data);
+                audioFilePath = tempFile;
             }
 
             if (result.AudioDuration.HasValue)
