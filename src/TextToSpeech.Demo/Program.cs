@@ -43,13 +43,17 @@ class Program
         {
             Console.WriteLine();
             Console.WriteLine("Select TTS Provider:");
-            Console.WriteLine("1. Azure Cognitive Services TTS");
-            Console.WriteLine("2. EdgeTTS (HTTP)");
-            Console.WriteLine("3. VoiceRSS");
-            Console.WriteLine("4. Google TTS (gTTS)");
-            Console.WriteLine("5. Piper (local ONNX)");
+            Console.WriteLine("1. Azure Cognitive Services TTS (requires API key)");
+            Console.WriteLine("2. EdgeTTS (HTTP) (requires EdgeTTS server running)");
+            Console.WriteLine("3. VoiceRSS (requires API key)");
+            Console.WriteLine("4. Google TTS (gTTS) (free, no key required)");
+            Console.WriteLine("5. Piper (local ONNX) (requires model file)");
             Console.WriteLine("6. Orchestration (with fallback) - DEMO FALLBACK");
             Console.WriteLine("0. Exit");
+            Console.WriteLine();
+            Console.WriteLine("Note: Some providers require API keys or external services.");
+            Console.WriteLine("      Option 4 (Google TTS) should work without configuration.");
+            Console.WriteLine("      Option 6 demonstrates automatic fallback mechanism.");
             Console.WriteLine();
             Console.Write("Your choice: ");
 
@@ -72,7 +76,7 @@ class Program
                 ITtsProvider? provider = choice switch
                 {
                     "1" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "AzureTTS"),
-                    "2" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "EdgeTTS"),
+                    "2" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "EdgeTTS-HTTP"),
                     "3" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "VoiceRSS"),
                     "4" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "GoogleTTS"),
                     "5" => serviceProvider.GetServices<ITtsProvider>().FirstOrDefault(p => p.Name == "Piper"),
