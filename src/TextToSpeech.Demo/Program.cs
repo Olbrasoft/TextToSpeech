@@ -321,11 +321,25 @@ class Program
     {
         try
         {
-            // Use aplay for audio playback on Linux
+            // Find available audio player (same approach as PushToTalk project)
+            var player = GetAvailableAudioPlayer();
+
+            if (string.IsNullOrEmpty(player))
+            {
+                Console.WriteLine("⚠️  No audio player found (tried pw-cat, paplay, aplay)");
+                Console.WriteLine($"   Install PipeWire or PulseAudio to enable playback");
+                return;
+            }
+
+            // pw-cat needs -p flag for playback mode, others don't
+            var arguments = player == "pw-cat"
+                ? $"-p \"{filePath}\""
+                : $"\"{filePath}\"";
+
             var processInfo = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "aplay",
-                Arguments = $"\"{filePath}\"",
+                FileName = player,
+                Arguments = arguments,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -341,14 +355,58 @@ class Program
                 {
                     var error = process.StandardError.ReadToEnd();
                     Console.WriteLine($"⚠️  Playback failed: {error}");
-                    Console.WriteLine($"   You can manually play: aplay \"{filePath}\"");
+                    Console.WriteLine($"   You can manually play: {player} {arguments}");
                 }
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"⚠️  Could not play audio: {ex.Message}");
-            Console.WriteLine($"   You can manually play: aplay \"{filePath}\"");
         }
+    }
+
+    private static string? GetAvailableAudioPlayer()
+    {
+        // Try pw-cat (PipeWire) first - modern Linux audio system
+        if (IsCommandAvailable("pw-cat"))
+            return "pw-cat";
+
+        // Fallback to paplay (PulseAudio) - older but widely supported
+        if (IsCommandAvailable("paplay"))
+            return "paplay";
+
+        // Last resort: aplay (ALSA) - basic but universal
+        if (IsCommandAvailable("aplay"))
+            return "aplay";
+
+        return null;
+    }
+
+    private static bool IsCommandAvailable(string command)
+    {
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "which",
+                Arguments = command,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true
+            };
+
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process != null)
+            {
+                process.WaitForExit();
+                return process.ExitCode == 0;
+            }
+        }
+        catch
+        {
+            // Ignore
+        }
+
+        return false;
     }
 }
