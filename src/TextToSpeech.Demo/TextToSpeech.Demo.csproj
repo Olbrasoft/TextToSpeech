@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Olbrasoft.TextToSpeech.Demo</RootNamespace>
+
+    <!-- This is a demo application, not a library - do not pack -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
