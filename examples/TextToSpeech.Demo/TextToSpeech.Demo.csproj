@@ -12,11 +12,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\TextToSpeech.Core\TextToSpeech.Core.csproj" />
-    <ProjectReference Include="..\TextToSpeech.Providers\TextToSpeech.Providers.csproj" />
-    <ProjectReference Include="..\TextToSpeech.Providers.Piper\TextToSpeech.Providers.Piper.csproj" />
-    <ProjectReference Include="..\TextToSpeech.Orchestration\TextToSpeech.Orchestration.csproj" />
-    <ProjectReference Include="..\TextToSpeech.Providers.EdgeTTS\TextToSpeech.Providers.EdgeTTS.csproj">
+    <ProjectReference Include="..\..\src\TextToSpeech.Core\TextToSpeech.Core.csproj" />
+    <ProjectReference Include="..\..\src\TextToSpeech.Providers\TextToSpeech.Providers.csproj" />
+    <ProjectReference Include="..\..\src\TextToSpeech.Providers.Piper\TextToSpeech.Providers.Piper.csproj" />
+    <ProjectReference Include="..\..\src\TextToSpeech.Orchestration\TextToSpeech.Orchestration.csproj" />
+    <ProjectReference Include="..\..\src\TextToSpeech.Providers.EdgeTTS\TextToSpeech.Providers.EdgeTTS.csproj">
       <Aliases>EdgeTtsWebSocket</Aliases>
     </ProjectReference>
   </ItemGroup>
