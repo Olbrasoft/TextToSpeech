@@ -12,21 +12,25 @@ namespace Olbrasoft.TextToSpeech.Providers.Extensions;
 
 /// <summary>
 /// Extension methods for registering TTS providers with dependency injection.
+/// IMPORTANT: This library does NOT configure providers - it only registers them.
+/// The hosting application is responsible for calling services.Configure&lt;T&gt;()
+/// to populate configuration objects from appsettings.json, environment variables,
+/// database, Key Vault, or any other source.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Adds TTS providers to the service collection.
+    /// NOTE: Configuration objects must be populated by hosting app BEFORE calling this method.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="configuration">The configuration.</param>
+    /// <param name="configuration">The configuration (used for HttpClient setup only).</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddTtsProviders(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Register output configuration
-        services.Configure<OutputConfiguration>(configuration.GetSection(OutputConfiguration.SectionName));
+        // Register IOutputConfiguration adapter (no Configure call - hosting app must do it)
         services.AddSingleton<IOutputConfiguration>(sp =>
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<OutputConfiguration>>().Value);
 
@@ -53,17 +57,16 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Adds the EdgeTTS HTTP provider.
+    /// NOTE: Hosting app must call services.Configure&lt;EdgeTtsConfiguration&gt;() first.
     /// </summary>
     public static IServiceCollection AddEdgeTtsProvider(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.Configure<EdgeTtsConfiguration>(configuration.GetSection(EdgeTtsConfiguration.SectionName));
-
+        // Configure HttpClient using values from IOptions (populated by hosting app)
         services.AddHttpClient("EdgeTtsServer", (sp, client) =>
         {
-            var config = configuration.GetSection(EdgeTtsConfiguration.SectionName).Get<EdgeTtsConfiguration>()
-                         ?? new EdgeTtsConfiguration();
+            var config = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EdgeTtsConfiguration>>().Value;
             client.BaseAddress = new Uri(config.BaseUrl);
             client.Timeout = config.Timeout;
         });
@@ -75,12 +78,13 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Adds the Azure Cognitive Services TTS provider.
+    /// NOTE: Hosting app must call services.Configure&lt;AzureTtsConfiguration&gt;() first.
     /// </summary>
     public static IServiceCollection AddAzureTtsProvider(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.Configure<AzureTtsConfiguration>(configuration.GetSection(AzureTtsConfiguration.SectionName));
+        // No Configure call - hosting app must populate AzureTtsConfiguration
         services.AddSingleton<ITtsProvider, AzureTtsProvider>();
 
         return services;
@@ -88,17 +92,16 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Adds the VoiceRSS TTS provider.
+    /// NOTE: Hosting app must call services.Configure&lt;VoiceRssConfiguration&gt;() first.
     /// </summary>
     public static IServiceCollection AddVoiceRssProvider(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.Configure<VoiceRssConfiguration>(configuration.GetSection(VoiceRssConfiguration.SectionName));
-
+        // Configure HttpClient using values from IOptions (populated by hosting app)
         services.AddHttpClient("VoiceRSS", (sp, client) =>
         {
-            var config = configuration.GetSection(VoiceRssConfiguration.SectionName).Get<VoiceRssConfiguration>()
-                         ?? new VoiceRssConfiguration();
+            var config = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<VoiceRssConfiguration>>().Value;
             client.Timeout = config.Timeout;
         });
 
@@ -109,12 +112,13 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Adds the Google TTS (gTTS) provider.
+    /// NOTE: Hosting app must call services.Configure&lt;GoogleTtsConfiguration&gt;() first.
     /// </summary>
     public static IServiceCollection AddGoogleTtsProvider(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.Configure<GoogleTtsConfiguration>(configuration.GetSection(GoogleTtsConfiguration.SectionName));
+        // No Configure call - hosting app must populate GoogleTtsConfiguration
         services.AddSingleton<ITtsProvider, GoogleTtsProvider>();
 
         return services;
