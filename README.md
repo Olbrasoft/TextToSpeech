@@ -11,16 +11,18 @@ A comprehensive .NET library for Text-to-Speech synthesis with multiple provider
 | Package | Description | NuGet |
 |---------|-------------|-------|
 | **Olbrasoft.TextToSpeech.Core** | Core interfaces and models (ITtsProvider, TtsRequest, TtsResult) | [![NuGet](https://img.shields.io/nuget/v/Olbrasoft.TextToSpeech.Core.svg)](https://www.nuget.org/packages/Olbrasoft.TextToSpeech.Core/) |
-| **Olbrasoft.TextToSpeech.Providers** | Provider implementations (Azure, EdgeTTS, Google, VoiceRSS) | [![NuGet](https://img.shields.io/nuget/v/Olbrasoft.TextToSpeech.Providers.svg)](https://www.nuget.org/packages/Olbrasoft.TextToSpeech.Providers/) |
+| **Olbrasoft.TextToSpeech.Providers** | Provider implementations (Azure, EdgeTTS-HTTP, Google, VoiceRSS) | [![NuGet](https://img.shields.io/nuget/v/Olbrasoft.TextToSpeech.Providers.svg)](https://www.nuget.org/packages/Olbrasoft.TextToSpeech.Providers/) |
+| **Olbrasoft.TextToSpeech.Providers.EdgeTTS** | EdgeTTS WebSocket provider - FREE, direct Microsoft API, no server needed | [![NuGet](https://img.shields.io/nuget/v/Olbrasoft.TextToSpeech.Providers.EdgeTTS.svg)](https://www.nuget.org/packages/Olbrasoft.TextToSpeech.Providers.EdgeTTS/) |
 | **Olbrasoft.TextToSpeech.Providers.Piper** | Piper TTS provider for offline synthesis using ONNX models | [![NuGet](https://img.shields.io/nuget/v/Olbrasoft.TextToSpeech.Providers.Piper.svg)](https://www.nuget.org/packages/Olbrasoft.TextToSpeech.Providers.Piper/) |
 | **Olbrasoft.TextToSpeech.Orchestration** | Orchestration with circuit breaker and multi-provider fallback | [![NuGet](https://img.shields.io/nuget/v/Olbrasoft.TextToSpeech.Orchestration.svg)](https://www.nuget.org/packages/Olbrasoft.TextToSpeech.Orchestration/) |
 
 ## Features
 
-- **Multiple TTS Providers**: Azure Cognitive Services, Edge TTS, Google TTS, VoiceRSS, and Piper (offline)
+- **Multiple TTS Providers**: Azure Cognitive Services, EdgeTTS (WebSocket & HTTP), Google TTS, VoiceRSS, and Piper (offline)
 - **Circuit Breaker Pattern**: Automatic failure detection with exponential backoff using Polly
 - **Provider Fallback Chain**: Automatic failover to backup providers when primary fails
 - **Configurable Priority**: Define provider priority order via configuration
+- **FREE Edge TTS**: Direct WebSocket communication with Microsoft Edge TTS API - no API key or server required
 - **Offline Support**: Piper provider works completely offline with ONNX neural voice models
 - **Voice Profiles**: Configure different voice settings per use case
 
@@ -30,8 +32,11 @@ A comprehensive .NET library for Text-to-Speech synthesis with multiple provider
 # Core abstractions
 dotnet add package Olbrasoft.TextToSpeech.Core
 
-# Cloud providers (Azure, Edge TTS, Google, VoiceRSS)
+# Cloud providers (Azure, EdgeTTS-HTTP, Google, VoiceRSS)
 dotnet add package Olbrasoft.TextToSpeech.Providers
+
+# EdgeTTS WebSocket (FREE - direct Microsoft API, no server)
+dotnet add package Olbrasoft.TextToSpeech.Providers.EdgeTTS
 
 # Offline Piper provider
 dotnet add package Olbrasoft.TextToSpeech.Providers.Piper
@@ -50,8 +55,12 @@ using Olbrasoft.TextToSpeech.Providers.Extensions;
 using Olbrasoft.TextToSpeech.Providers.Piper.Extensions;
 using Olbrasoft.TextToSpeech.Orchestration.Extensions;
 
-builder.Services.AddTtsProviders(configuration);      // Azure, EdgeTTS, Google, VoiceRSS
+builder.Services.AddTtsProviders(configuration);      // Azure, EdgeTTS-HTTP, Google, VoiceRSS
 builder.Services.AddPiperTts(configuration);          // Piper (offline)
+
+// Optional: Add EdgeTTS WebSocket (FREE, no server needed)
+builder.Services.AddSingleton<ITtsProvider, Olbrasoft.TextToSpeech.Providers.EdgeTTS.EdgeTtsProvider>();
+
 builder.Services.AddTtsOrchestration(configuration);  // Circuit breaker & fallback chain
 ```
 
@@ -62,19 +71,26 @@ builder.Services.AddTtsOrchestration(configuration);  // Circuit breaker & fallb
   "TTS": {
     "Orchestration": {
       "Providers": [
-        { "Name": "EdgeTTS-HTTP", "Priority": 1, "Enabled": true },
+        { "Name": "EdgeTTS-WebSocket", "Priority": 1, "Enabled": true },
         { "Name": "AzureTTS", "Priority": 2, "Enabled": true },
-        { "Name": "Piper", "Priority": 3, "Enabled": true }
+        { "Name": "GoogleTTS", "Priority": 3, "Enabled": true },
+        { "Name": "Piper", "Priority": 4, "Enabled": true }
       ]
     },
     "EdgeTTS": {
-      "BaseUrl": "http://localhost:5555",
-      "DefaultVoice": "cs-CZ-AntoninNeural"
+      "Voice": "cs-CZ-AntoninNeural",
+      "Rate": "+10%",
+      "Volume": "+0%",
+      "Pitch": "+0Hz"
     },
     "AzureTTS": {
-      "SubscriptionKey": "your-key",
+      "SubscriptionKey": "your-key-here",
       "Region": "westeurope",
-      "DefaultVoice": "cs-CZ-AntoninNeural"
+      "Voice": "cs-CZ-AntoninNeural"
+    },
+    "Google": {
+      "Language": "cs",
+      "Voice": "cs-CZ-Standard-A"
     },
     "Piper": {
       "ModelPath": "/path/to/model.onnx",
@@ -122,13 +138,14 @@ public class SpeechService
 
 ## Supported Providers
 
-| Provider | Type | Features |
-|----------|------|----------|
-| **Azure Cognitive Services** | Cloud | High quality, many voices, SSML support |
-| **Edge TTS** | Cloud/Self-hosted | Free, Microsoft voices via HTTP server |
-| **Google TTS** | Cloud | Free tier available, many languages |
-| **VoiceRSS** | Cloud | Free tier, simple API |
-| **Piper** | Local | Offline, ONNX models, custom voices |
+| Provider | Type | API Key | Features |
+|----------|------|---------|----------|
+| **Azure Cognitive Services** | Cloud API | ✅ Required | High quality neural voices, SSML support, low latency |
+| **EdgeTTS WebSocket** | Direct API | ❌ FREE | Microsoft voices, no server needed, WebSocket communication |
+| **EdgeTTS HTTP** | HTTP Server | ❌ FREE | Requires edge-tts-server running on localhost |
+| **Google TTS (gTTS)** | Cloud API | ❌ FREE | Google Translate TTS, simple and reliable |
+| **VoiceRSS** | Cloud API | ✅ Required | Free tier (350 req/day), Czech voice "Josef" |
+| **Piper** | Local ONNX | ❌ FREE | Completely offline, privacy-friendly, custom voice models |
 
 ## Circuit Breaker Configuration
 
@@ -143,6 +160,42 @@ public class SpeechService
 }
 ```
 
+## Demo Application
+
+A comprehensive demo console application is available in the `examples/` directory:
+
+```bash
+cd examples/TextToSpeech.Demo
+dotnet run
+```
+
+**Features:**
+- Interactive menu for testing all TTS providers
+- Real-time timestamp in speech (proves it's not pre-recorded)
+- Automatic audio playback using PipeWire/PulseAudio/ALSA
+- Demonstrates automatic fallback mechanism
+- No configuration required for EdgeTTS WebSocket and Google TTS
+
+See [examples/TextToSpeech.Demo/README.md](examples/TextToSpeech.Demo/README.md) for detailed documentation.
+
+## Project Structure
+
+```
+TextToSpeech/
+├── src/                                    # Library packages (published to NuGet)
+│   ├── TextToSpeech.Core/                  # Core interfaces and models
+│   ├── TextToSpeech.Providers/             # Cloud providers (Azure, EdgeTTS-HTTP, Google, VoiceRSS)
+│   ├── TextToSpeech.Providers.EdgeTTS/     # EdgeTTS WebSocket provider
+│   ├── TextToSpeech.Providers.Piper/       # Piper offline provider
+│   └── TextToSpeech.Orchestration/         # Circuit breaker and fallback chain
+├── tests/                                  # Unit tests
+│   ├── TextToSpeech.Core.Tests/
+│   ├── TextToSpeech.Providers.Tests/
+│   └── TextToSpeech.Orchestration.Tests/
+└── examples/                               # Demo applications (not published)
+    └── TextToSpeech.Demo/                  # Interactive console demo
+```
+
 ## Building from Source
 
 ```bash
@@ -154,9 +207,11 @@ dotnet test
 
 ## Requirements
 
-- .NET 10.0 or later
-- For Piper: piper-tts binary and ONNX voice model
-- For Edge TTS: edge-tts-server running (optional)
+- **.NET 10.0** or later
+- **EdgeTTS WebSocket**: No requirements - works out of the box (FREE)
+- **EdgeTTS HTTP**: edge-tts-server running on localhost:5555 (optional)
+- **Piper**: piper-tts binary and ONNX voice model file
+- **Azure/VoiceRSS**: API key from respective services
 
 ## License
 
