@@ -193,10 +193,13 @@ class Program
 
         if (result.Success && result.Audio != null)
         {
+            string? audioFilePath = null;
+
             if (result.Audio is FileAudioData fileData)
             {
                 Console.WriteLine($"File Path: {fileData.FilePath}");
                 Console.WriteLine($"✓ Audio saved successfully!");
+                audioFilePath = fileData.FilePath;
             }
             else if (result.Audio is MemoryAudioData memoryData)
             {
@@ -208,6 +211,14 @@ class Program
             if (result.AudioDuration.HasValue)
             {
                 Console.WriteLine($"Audio Length: {result.AudioDuration.Value.TotalSeconds:F1} seconds");
+            }
+
+            // Auto-play audio file on Linux
+            if (!string.IsNullOrEmpty(audioFilePath) && File.Exists(audioFilePath))
+            {
+                Console.WriteLine();
+                Console.WriteLine("▶️  Playing audio...");
+                PlayAudioFile(audioFilePath);
             }
         }
         else
@@ -259,10 +270,13 @@ class Program
 
         if (result.Success && result.Audio != null)
         {
+            string? audioFilePath = null;
+
             if (result.Audio is FileAudioData fileData)
             {
                 Console.WriteLine($"File Path: {fileData.FilePath}");
                 Console.WriteLine($"✓ Audio saved successfully!");
+                audioFilePath = fileData.FilePath;
             }
             else if (result.Audio is MemoryAudioData memoryData)
             {
@@ -286,6 +300,14 @@ class Program
                     Console.WriteLine($"  - {attempt.ProviderName}: {attempt.ErrorMessage}");
                 }
             }
+
+            // Auto-play audio file on Linux
+            if (!string.IsNullOrEmpty(audioFilePath) && File.Exists(audioFilePath))
+            {
+                Console.WriteLine();
+                Console.WriteLine("▶️  Playing audio...");
+                PlayAudioFile(audioFilePath);
+            }
         }
         else
         {
@@ -293,5 +315,40 @@ class Program
         }
 
         Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    }
+
+    private static void PlayAudioFile(string filePath)
+    {
+        try
+        {
+            // Use aplay for audio playback on Linux
+            var processInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "aplay",
+                Arguments = $"\"{filePath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = System.Diagnostics.Process.Start(processInfo);
+            if (process != null)
+            {
+                process.WaitForExit();
+
+                if (process.ExitCode != 0)
+                {
+                    var error = process.StandardError.ReadToEnd();
+                    Console.WriteLine($"⚠️  Playback failed: {error}");
+                    Console.WriteLine($"   You can manually play: aplay \"{filePath}\"");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️  Could not play audio: {ex.Message}");
+            Console.WriteLine($"   You can manually play: aplay \"{filePath}\"");
+        }
     }
 }
