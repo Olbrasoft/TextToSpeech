@@ -12,15 +12,9 @@ public sealed class VoiceRssConfiguration
 
     /// <summary>
     /// API key for VoiceRSS service.
-    /// Can also be set via environment variable VOICERSS_API_KEY.
+    /// Hosting application is responsible for loading this from secure storage.
     /// </summary>
     public string ApiKey { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Path to file containing API key.
-    /// Supports ~ for home directory (e.g., "~/Dokumenty/credentials/voicerss.txt").
-    /// </summary>
-    public string ApiKeyFile { get; set; } = string.Empty;
 
     /// <summary>
     /// Language code (e.g., "cs-cz" for Czech, "en-us" for US English).

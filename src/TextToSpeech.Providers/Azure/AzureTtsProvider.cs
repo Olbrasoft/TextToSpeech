@@ -41,15 +41,9 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
         _outputConfig = outputConfig;
         _audioDataFactory = audioDataFactory;
 
-        // Get subscription key from options or environment variable
-        _subscriptionKey = !string.IsNullOrEmpty(_config.SubscriptionKey)
-            ? _config.SubscriptionKey
-            : Environment.GetEnvironmentVariable("AZURE_SPEECH_KEY") ?? string.Empty;
-
-        // Get region from options or environment variable
-        _region = !string.IsNullOrEmpty(_config.Region) && _config.Region != "westeurope"
-            ? _config.Region
-            : Environment.GetEnvironmentVariable("AZURE_SPEECH_REGION") ?? _config.Region;
+        // Use configuration as-is (hosting app is responsible for loading secrets)
+        _subscriptionKey = _config.SubscriptionKey;
+        _region = _config.Region;
 
         // Validate configuration
         _isConfigured = !string.IsNullOrEmpty(_subscriptionKey) && !string.IsNullOrEmpty(_region);
@@ -59,18 +53,12 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
             try
             {
                 _speechConfig = SpeechConfig.FromSubscription(_subscriptionKey, _region);
-
-                // Get voice from options or environment variable
-                var voice = !string.IsNullOrEmpty(_config.Voice)
-                    ? _config.Voice
-                    : Environment.GetEnvironmentVariable("AZURE_SPEECH_VOICE") ?? "cs-CZ-AntoninNeural";
-
-                _speechConfig.SpeechSynthesisVoiceName = voice;
+                _speechConfig.SpeechSynthesisVoiceName = _config.Voice;
 
                 // Set output format
                 _speechConfig.SetSpeechSynthesisOutputFormat(GetOutputFormat(_config.OutputFormat));
 
-                _logger.LogInformation("Azure TTS configured: region={Region}, voice={Voice}", _region, voice);
+                _logger.LogInformation("Azure TTS configured: region={Region}, voice={Voice}", _region, _config.Voice);
             }
             catch (Exception ex)
             {
@@ -80,7 +68,7 @@ public sealed class AzureTtsProvider : ITtsProvider, IDisposable
         }
         else
         {
-            _logger.LogWarning("Azure TTS not configured - missing AZURE_SPEECH_KEY or AZURE_SPEECH_REGION");
+            _logger.LogWarning("Azure TTS not configured - missing SubscriptionKey or Region in configuration");
         }
     }
 

@@ -169,71 +169,8 @@ public sealed class VoiceRssProvider : ITtsProvider
 
     private string? LoadApiKey()
     {
-        // First try direct API key from config
-        if (!string.IsNullOrEmpty(_config.ApiKey))
-        {
-            return _config.ApiKey;
-        }
-
-        // Try environment variable
-        var envKey = Environment.GetEnvironmentVariable("VOICERSS_API_KEY");
-        if (!string.IsNullOrEmpty(envKey))
-        {
-            _logger.LogDebug("Using VoiceRSS API key from environment variable");
-            return envKey;
-        }
-
-        // Try file
-        if (!string.IsNullOrEmpty(_config.ApiKeyFile))
-        {
-            try
-            {
-                var keyPath = _config.ApiKeyFile;
-
-                // Expand ~ to home directory
-                if (keyPath.StartsWith("~/"))
-                {
-                    keyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), keyPath[2..]);
-                }
-
-                if (!File.Exists(keyPath))
-                {
-                    _logger.LogDebug("VoiceRSS API key file not found: {Path}", keyPath);
-                    return null;
-                }
-
-                // Read file and extract API key
-                var content = File.ReadAllText(keyPath);
-
-                // Try to find API_KEY= line
-                foreach (var line in content.Split('\n'))
-                {
-                    var trimmed = line.Trim();
-                    if (trimmed.StartsWith("API_KEY="))
-                    {
-                        _logger.LogDebug("Loaded VoiceRSS API key from file");
-                        return trimmed["API_KEY=".Length..].Trim();
-                    }
-                }
-
-                // If no API_KEY= found, assume whole file is the key
-                var key = content.Trim();
-                if (key.Length == 32) // VoiceRSS keys are 32 chars
-                {
-                    _logger.LogDebug("Loaded VoiceRSS API key from file");
-                    return key;
-                }
-
-                _logger.LogWarning("Could not parse API key from file: {Path}", keyPath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error loading VoiceRSS API key from file");
-            }
-        }
-
-        _logger.LogWarning("VoiceRSS API key not configured");
-        return null;
+        // Use configuration as-is (hosting app is responsible for loading secrets)
+        return _config.ApiKey;
     }
 
     private static string GetContentType(string audioCodec) =>

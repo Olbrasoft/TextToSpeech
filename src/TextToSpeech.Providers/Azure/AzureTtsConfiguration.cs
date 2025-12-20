@@ -12,20 +12,18 @@ public sealed class AzureTtsConfiguration
 
     /// <summary>
     /// Azure Speech Services subscription key.
-    /// Can also be set via environment variable AZURE_SPEECH_KEY.
+    /// Hosting application is responsible for loading this from secure storage.
     /// </summary>
     public string SubscriptionKey { get; set; } = string.Empty;
 
     /// <summary>
     /// Azure Speech Services region (e.g., "westeurope", "eastus").
-    /// Can also be set via environment variable AZURE_SPEECH_REGION.
     /// Default: westeurope.
     /// </summary>
     public string Region { get; set; } = "westeurope";
 
     /// <summary>
     /// Voice name for synthesis (e.g., "cs-CZ-AntoninNeural").
-    /// Can also be set via environment variable AZURE_SPEECH_VOICE.
     /// </summary>
     public string Voice { get; set; } = "cs-CZ-AntoninNeural";
 
