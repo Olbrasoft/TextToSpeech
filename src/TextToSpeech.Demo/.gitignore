@@ -1,0 +1,12 @@
+# Audio output directory (generated files)
+audio-output/
+*.mp3
+*.wav
+
+# Build outputs
+bin/
+obj/
+
+# User-specific files
+*.user
+*.suo
