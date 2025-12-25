@@ -66,6 +66,26 @@ public sealed class TtsRequest : IValidatableObject
     public string? PreferredProvider { get; init; }
 
     /// <summary>
+    /// Gets the ordered list of provider names to try for this request.
+    /// When specified, overrides the default provider chain from configuration.
+    /// Providers are tried in the order specified until one succeeds.
+    /// </summary>
+    public IReadOnlyList<string>? ProviderFallbackChain { get; init; }
+
+    /// <summary>
+    /// Gets the agent/program name that initiated this request (e.g., "Claude Code", "Gemini").
+    /// Used for logging, voice profile selection, and agent instance tracking.
+    /// </summary>
+    public string? AgentName { get; init; }
+
+    /// <summary>
+    /// Gets the unique identifier for this agent instance.
+    /// When multiple instances of the same agent are running, each has a unique instance ID.
+    /// Used for voice pool management to assign different voices to different instances.
+    /// </summary>
+    public string? AgentInstanceId { get; init; }
+
+    /// <summary>
     /// Validates the request and returns validation errors.
     /// </summary>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)

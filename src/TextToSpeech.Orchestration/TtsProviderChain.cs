@@ -52,7 +52,7 @@ public sealed class TtsProviderChain : ITtsProviderChain
     public async Task<TtsResult> SynthesizeAsync(TtsRequest request, CancellationToken cancellationToken = default)
     {
         var errors = new List<ProviderError>();
-        var providers = GetOrderedProviders(request.PreferredProvider);
+        var providers = GetOrderedProviders(request);
 
         foreach (var (provider, state) in providers)
         {
@@ -155,27 +155,69 @@ public sealed class TtsProviderChain : ITtsProviderChain
             .Select(p => p.Name);
     }
 
-    private IEnumerable<(ITtsProvider Provider, ProviderState State)> GetOrderedProviders(string? preferredProvider)
+    private IEnumerable<(ITtsProvider Provider, ProviderState State)> GetOrderedProviders(TtsRequest request)
     {
-        var orderedConfigs = _config.Providers
-            .Where(p => p.Enabled)
-            .OrderBy(p => p.Priority)
-            .ToList();
+        List<ProviderConfig> orderedConfigs;
 
-        // Handle PreferredProvider - move to front if exists
-        if (!string.IsNullOrEmpty(preferredProvider))
+        // If ProviderFallbackChain is specified in request, use it (overrides config)
+        if (request.ProviderFallbackChain != null && request.ProviderFallbackChain.Count > 0)
         {
-            var preferredConfig = orderedConfigs.FirstOrDefault(p =>
-                p.Name.Equals(preferredProvider, StringComparison.OrdinalIgnoreCase));
+            _logger.LogDebug(
+                "Using custom provider chain from request (Agent: {Agent}, Instance: {Instance}): {Chain}",
+                request.AgentName ?? "Unknown",
+                request.AgentInstanceId ?? "N/A",
+                string.Join(" -> ", request.ProviderFallbackChain));
 
-            if (preferredConfig != null)
+            orderedConfigs = new List<ProviderConfig>();
+            foreach (var providerName in request.ProviderFallbackChain)
             {
-                orderedConfigs.Remove(preferredConfig);
-                orderedConfigs.Insert(0, preferredConfig);
+                var config = _config.Providers.FirstOrDefault(p =>
+                    p.Enabled && p.Name.Equals(providerName, StringComparison.OrdinalIgnoreCase));
+
+                if (config != null)
+                {
+                    orderedConfigs.Add(config);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Provider '{Provider}' from fallback chain not found or disabled, skipping",
+                        providerName);
+                }
             }
-            else
+
+            if (orderedConfigs.Count == 0)
             {
-                _logger.LogWarning("PreferredProvider '{Provider}' not found, using default chain", preferredProvider);
+                _logger.LogWarning("No valid providers in fallback chain, using default configuration");
+                orderedConfigs = _config.Providers
+                    .Where(p => p.Enabled)
+                    .OrderBy(p => p.Priority)
+                    .ToList();
+            }
+        }
+        else
+        {
+            // Use default configuration with optional PreferredProvider
+            orderedConfigs = _config.Providers
+                .Where(p => p.Enabled)
+                .OrderBy(p => p.Priority)
+                .ToList();
+
+            // Handle PreferredProvider - move to front if exists
+            if (!string.IsNullOrEmpty(request.PreferredProvider))
+            {
+                var preferredConfig = orderedConfigs.FirstOrDefault(p =>
+                    p.Name.Equals(request.PreferredProvider, StringComparison.OrdinalIgnoreCase));
+
+                if (preferredConfig != null)
+                {
+                    orderedConfigs.Remove(preferredConfig);
+                    orderedConfigs.Insert(0, preferredConfig);
+                }
+                else
+                {
+                    _logger.LogWarning("PreferredProvider '{Provider}' not found, using default chain", request.PreferredProvider);
+                }
             }
         }
 
