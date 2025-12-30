@@ -2,14 +2,26 @@
 
 ## 📦 Archive Status
 
-**The standalone ASP.NET Core service (src/TextToSpeech.Service) has been archived as of 2025-12-30.**
+**The standalone ASP.NET Core service (src/TextToSpeech.Service) has been ARCHIVED as of 2025-12-30.**
 
-**What's still active:**
-- All NuGet library packages (Core, Providers, Orchestration) are actively maintained
-- Used directly in VirtualAssistant project via inline integration (issue #404)
+**Reason:** Integrated inline into VirtualAssistant project (issue #404).
 
-**What's archived:**
-- src/TextToSpeech.Service (standalone ASP.NET Core API - no longer used)
+**What's still ACTIVE:**
+- ✅ All NuGet library packages (Core, Providers, Orchestration) are actively maintained
+- ✅ Used directly in VirtualAssistant project via inline integration
+- ✅ Development continues in this repository for TTS provider libraries
+
+**What's ARCHIVED:**
+- ❌ src/TextToSpeech.Service (standalone ASP.NET Core API - no longer used)
+- ❌ No systemd service running
+- ❌ No HTTP endpoint on port 5060
+
+## Integration Status
+
+VirtualAssistant now uses TextToSpeech libraries directly:
+- Consumes NuGet packages (version 1.*)
+- Registers providers inline (no HTTP calls)
+- See: [VirtualAssistant issue #404](https://github.com/Olbrasoft/VirtualAssistant/issues/404)
 
 ---
 
