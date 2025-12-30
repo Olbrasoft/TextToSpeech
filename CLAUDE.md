@@ -1,5 +1,18 @@
 # TextToSpeech Project - Claude Instructions
 
+## 📦 Archive Status
+
+**The standalone ASP.NET Core service (src/TextToSpeech.Service) has been archived as of 2025-12-30.**
+
+**What's still active:**
+- All NuGet library packages (Core, Providers, Orchestration) are actively maintained
+- Used directly in VirtualAssistant project via inline integration (issue #404)
+
+**What's archived:**
+- src/TextToSpeech.Service (standalone ASP.NET Core API - no longer used)
+
+---
+
 ## ⚠️ CRITICAL: Python Ban
 
 **ABSOLUTE BAN on Python usage in this project.**
@@ -17,12 +30,15 @@
 
 ## Approved TTS Providers
 
-### ✅ Piper (RECOMMENDED)
+### ✅ Piper (RECOMMENDED - GUARANTEED FALLBACK)
 - **Implementation**: `TextToSpeech.Providers.Piper` (already exists)
 - **Technology**: ONNX Runtime (pure C#)
 - **Models**: Pre-trained ONNX models (download ready-made)
 - **Czech voices**: Available at https://rhasspy.github.io/piper-samples/
 - **NO TRAINING REQUIRED** - use pre-trained models
+- **CRITICAL**: Piper is configured as the FINAL FALLBACK with circuit breaker effectively disabled
+- **Purpose**: Ensures notifications are ALWAYS read, even when all cloud providers fail
+- **Configuration**: FailureThreshold=999999, no exponential backoff - always attempts synthesis
 
 ### ✅ EdgeTTS
 - **Implementation**: `TextToSpeech.Providers.EdgeTTS` (already exists)

@@ -4,6 +4,27 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-blue)](https://dotnet.microsoft.com/)
 
+## Archive Notice
+
+**Status:** Archived (2025-12-30)
+
+This standalone ASP.NET Core service has been integrated directly into VirtualAssistant.
+The TTS provider libraries (Core, Providers, Orchestration) are still actively maintained as NuGet packages.
+
+**Migration:** See VirtualAssistant issue #404 for inline TTS integration details.
+
+**Libraries still in use:**
+- Olbrasoft.TextToSpeech.Core
+- Olbrasoft.TextToSpeech.Providers
+- Olbrasoft.TextToSpeech.Providers.EdgeTTS
+- Olbrasoft.TextToSpeech.Providers.Piper
+- Olbrasoft.TextToSpeech.Orchestration
+
+**Archived project:**
+- src/TextToSpeech.Service (ASP.NET Core API - no longer used)
+
+---
+
 A comprehensive .NET library for Text-to-Speech synthesis with multiple providers, circuit breaker pattern, and automatic fallback support.
 
 ## Packages
