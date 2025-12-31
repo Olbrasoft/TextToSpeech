@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Olbrasoft.TextToSpeech.Providers.GoogleCloud</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- NuGet Package -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Olbrasoft.TextToSpeech.Providers.GoogleCloud</PackageId>
+    <Version>1.1.0</Version>
+    <Authors>Olbrasoft</Authors>
+    <Company>Olbrasoft</Company>
+    <Description>Google Cloud Text-to-Speech provider with support for high-quality Chirp3-HD voices. Requires API key.</Description>
+    <PackageTags>tts;text-to-speech;google-cloud;chirp3-hd;czech</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Olbrasoft/TextToSpeech</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Olbrasoft/TextToSpeech</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageIcon>text-to-speech.png</PackageIcon>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TextToSpeech.Core\TextToSpeech.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\text-to-speech.png" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+</Project>

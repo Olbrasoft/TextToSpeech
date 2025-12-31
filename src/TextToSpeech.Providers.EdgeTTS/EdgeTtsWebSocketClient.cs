@@ -162,6 +162,7 @@ internal sealed class EdgeTtsWebSocketClient : IDisposable
     {
         var audioChunks = new List<byte>();
         var buffer = new byte[16384];
+        var messageBuffer = new List<byte>(); // Buffer for multi-frame messages
 
         while (client.State == WebSocketState.Open)
         {
@@ -172,17 +173,26 @@ internal sealed class EdgeTtsWebSocketClient : IDisposable
                 break;
             }
 
-            if (result.MessageType == WebSocketMessageType.Binary)
+            // Accumulate message fragments until complete message received
+            messageBuffer.AddRange(buffer.Take(result.Count));
+
+            // Process only when complete message received (fixes bug where multi-frame messages were dropped)
+            if (result.EndOfMessage)
             {
-                ProcessBinaryMessage(buffer, result.Count, audioChunks);
-            }
-            else if (result.MessageType == WebSocketMessageType.Text)
-            {
-                var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                if (message.Contains("Path:turn.end"))
+                if (result.MessageType == WebSocketMessageType.Binary)
                 {
-                    break;
+                    ProcessBinaryMessage(messageBuffer.ToArray(), messageBuffer.Count, audioChunks);
                 }
+                else if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    var message = Encoding.UTF8.GetString(messageBuffer.ToArray());
+                    if (message.Contains("Path:turn.end"))
+                    {
+                        break;
+                    }
+                }
+
+                messageBuffer.Clear(); // Clear buffer for next message
             }
         }
 
