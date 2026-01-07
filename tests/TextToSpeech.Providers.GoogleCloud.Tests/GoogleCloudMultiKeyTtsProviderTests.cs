@@ -44,11 +44,12 @@ public class GoogleCloudMultiKeyTtsProviderTests
         InvalidOperationException? ex = null;
         try
         {
+            using var httpClient = new HttpClient();
             _ = new GoogleCloudMultiKeyTtsProvider(
                 Options.Create(config),
                 emptyConfiguration,
                 _loggerMock.Object,
-                new HttpClient());
+                httpClient);
         }
         catch (InvalidOperationException e)
         {
@@ -271,7 +272,7 @@ public class GoogleCloudMultiKeyTtsProviderTests
         });
 
         var configuration = CreateConfiguration(["actual-key-1"]);
-        var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
 
         var provider = new GoogleCloudMultiKeyTtsProvider(
             Options.Create(config),
@@ -282,8 +283,8 @@ public class GoogleCloudMultiKeyTtsProviderTests
         // Act - First call fails with rate limit
         var result1 = await provider.SynthesizeAsync(new TtsRequest { Text = "Test 1" });
 
-        // Wait for cooldown to expire
-        await Task.Delay(100);
+        // Wait for cooldown to expire (3x safety margin for CI stability)
+        await Task.Delay(150);
 
         // Second call should work - key is available again
         var result2 = await provider.SynthesizeAsync(new TtsRequest { Text = "Test 2" });
@@ -319,7 +320,7 @@ public class GoogleCloudMultiKeyTtsProviderTests
         };
 
         var configuration = new ConfigurationBuilder().Build();
-        var httpClient = new HttpClient(CreateSuccessHandler());
+        using var httpClient = new HttpClient(CreateSuccessHandler());
 
         var provider = new GoogleCloudMultiKeyTtsProvider(
             Options.Create(config),
@@ -360,6 +361,82 @@ public class GoogleCloudMultiKeyTtsProviderTests
         Assert.Equal(TimeSpan.FromSeconds(30), config.Timeout);
         Assert.Equal(TimeSpan.FromHours(1), config.RateLimitCooldown);
         Assert.Equal(TimeSpan.FromHours(24), config.QuotaExceededCooldown);
+    }
+
+    [Fact]
+    public async Task GetInfoAsync_AllKeysInCooldown_ReturnsDegraded()
+    {
+        // Arrange - config with long cooldown
+        var config = new GoogleCloudMultiKeyConfiguration
+        {
+            ApiKeySecrets =
+            [
+                new ApiKeyConfig { SecretKey = "Key1", Name = "primary" },
+                new ApiKeyConfig { SecretKey = "Key2", Name = "secondary" }
+            ],
+            RateLimitCooldown = TimeSpan.FromHours(1) // Long cooldown
+        };
+
+        var handler = new MockHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("Rate limit exceeded")
+            });
+
+        var configuration = CreateConfiguration(["key-1", "key-2"]);
+        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+
+        var provider = new GoogleCloudMultiKeyTtsProvider(
+            Options.Create(config),
+            configuration,
+            _loggerMock.Object,
+            httpClient);
+
+        // Act - Rate limit both keys
+        _ = await provider.SynthesizeAsync(new TtsRequest { Text = "Test" });
+
+        // Check status - all keys in cooldown
+        var info = await provider.GetInfoAsync();
+
+        // Assert
+        Assert.Equal(ProviderStatus.Degraded, info.Status);
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_CancellationRequested_ThrowsTaskCanceledException()
+    {
+        // Arrange
+        var config = new GoogleCloudMultiKeyConfiguration
+        {
+            ApiKeySecrets =
+            [
+                new ApiKeyConfig { SecretKey = "Key1", Name = "primary" }
+            ]
+        };
+
+        // Handler that simulates a slow response (uses async handler with cancellation support)
+        var handler = new MockHttpMessageHandler(async (request, ct) =>
+        {
+            await Task.Delay(1000, ct); // Simulate slow response with cancellation
+            return CreateSuccessResponse(Encoding.UTF8.GetBytes("audio"));
+        });
+
+        var configuration = CreateConfiguration(["key-1"]);
+        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+
+        var provider = new GoogleCloudMultiKeyTtsProvider(
+            Options.Create(config),
+            configuration,
+            _loggerMock.Object,
+            httpClient);
+
+        // Act - Use pre-cancelled token
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Assert
+        await Assert.ThrowsAsync<TaskCanceledException>(
+            () => provider.SynthesizeAsync(new TtsRequest { Text = "Test" }, cts.Token));
     }
 
     #region Helper Methods
@@ -429,17 +506,28 @@ public class GoogleCloudMultiKeyTtsProviderTests
 /// </summary>
 public class MockHttpMessageHandler : HttpMessageHandler
 {
-    private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;
+    private readonly Func<HttpRequestMessage, HttpResponseMessage>? _syncHandler;
+    private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? _asyncHandler;
 
     public MockHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> handler)
     {
-        _handler = handler;
+        _syncHandler = handler;
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(
+    public MockHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> asyncHandler)
+    {
+        _asyncHandler = asyncHandler;
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        return Task.FromResult(_handler(request));
+        if (_asyncHandler != null)
+        {
+            return await _asyncHandler(request, cancellationToken);
+        }
+
+        return _syncHandler!(request);
     }
 }

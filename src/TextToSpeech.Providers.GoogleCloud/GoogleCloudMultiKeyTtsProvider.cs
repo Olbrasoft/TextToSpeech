@@ -19,6 +19,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     private readonly ILogger<GoogleCloudMultiKeyTtsProvider> _logger;
     private readonly GoogleCloudMultiKeyConfiguration _config;
     private readonly HttpClient _httpClient;
+    private readonly bool _ownsHttpClient;
     private readonly List<ApiKeyStatus> _keyStatuses;
     private readonly object _lock = new();
     private DateTime? _lastSuccessTime;
@@ -39,11 +40,12 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     {
         _config = options.Value;
         _logger = logger;
-        _httpClient = httpClient ?? new HttpClient();
-        _httpClient.Timeout = _config.Timeout;
 
-        // Load actual keys from IConfiguration (which includes SecureStore)
-        _keyStatuses = _config.ApiKeySecrets
+        // Track ownership for proper disposal (don't dispose externally-provided HttpClient)
+        _ownsHttpClient = httpClient == null;
+
+        // Validate configuration BEFORE creating HttpClient to avoid resource leaks
+        var keyStatuses = _config.ApiKeySecrets
             .Select((keyConfig, index) =>
             {
                 var actualKey = configuration[keyConfig.SecretKey];
@@ -63,6 +65,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 };
             })
             .ToList();
+
+        // Only create/configure HttpClient after validation passes
+        _httpClient = httpClient ?? new HttpClient();
+        _httpClient.Timeout = _config.Timeout;
+        _keyStatuses = keyStatuses;
 
         _logger.LogInformation(
             "GoogleCloudMultiKeyTtsProvider initialized with {KeyCount} API keys",
@@ -84,7 +91,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         }
 
         // Try each available key until one succeeds
-        while (true)
+        // Max iterations = key count + 1 (safety margin to prevent infinite loops)
+        var maxIterations = _keyStatuses.Count + 1;
+        var iteration = 0;
+
+        while (iteration++ < maxIterations)
         {
             var keyStatus = GetNextAvailableKey();
             if (keyStatus == null)
@@ -107,6 +118,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
 
             // result is null means we should try the next key
         }
+
+        // Should never reach here, but safety fallback
+        stopwatch.Stop();
+        _logger.LogError("Max iterations reached in SynthesizeAsync - unexpected state");
+        return TtsResult.Fail("Internal error: max iterations exceeded", Name, stopwatch.Elapsed);
     }
 
     private async Task<TtsResult?> TrySynthesizeWithKeyAsync(
@@ -140,7 +156,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             };
 
             var json = JsonConvert.SerializeObject(requestBody);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             var url = $"{GoogleCloudMultiKeyConfiguration.ApiEndpoint}?key={keyStatus.ActualKey}";
             var response = await _httpClient.PostAsync(url, content, cancellationToken);
@@ -233,7 +249,10 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             "Google Cloud TTS synthesis successful with key #{Index} ({Name}): {Bytes} bytes in {Ms}ms",
             keyStatus.Index, keyStatus.Name, audioBytes.Length, stopwatch.ElapsedMilliseconds);
 
-        _lastSuccessTime = DateTime.UtcNow;
+        lock (_lock)
+        {
+            _lastSuccessTime = DateTime.UtcNow;
+        }
 
         var audioData = new MemoryAudioData
         {
@@ -250,12 +269,9 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         {
             var now = DateTime.UtcNow;
 
-            foreach (var key in _keyStatuses)
+            // Filter out permanently invalid keys using explicit Where()
+            foreach (var key in _keyStatuses.Where(k => k.State != ApiKeyState.Invalid))
             {
-                // Skip permanently invalid keys
-                if (key.State == ApiKeyState.Invalid)
-                    continue;
-
                 // Check if key is available
                 if (key.State == ApiKeyState.Available)
                     return key;
@@ -373,25 +389,30 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         }).ToList();
 
         // Determine status based on available keys
-        int availableKeys;
+        // Note: _keyStatuses is immutable after construction, but we use lock for consistent state
+        ProviderStatus status;
+        DateTime? lastSuccess;
         lock (_lock)
         {
-            availableKeys = _keyStatuses.Count(k =>
+            var totalKeys = _keyStatuses.Count;
+            var availableKeys = _keyStatuses.Count(k =>
                 k.State == ApiKeyState.Available ||
                 (k.CooldownUntil.HasValue && k.CooldownUntil.Value <= DateTime.UtcNow));
-        }
 
-        var status = _keyStatuses.Count == 0
-            ? ProviderStatus.Unavailable
-            : availableKeys > 0
-                ? ProviderStatus.Available
-                : ProviderStatus.Degraded;
+            status = totalKeys == 0
+                ? ProviderStatus.Unavailable
+                : availableKeys > 0
+                    ? ProviderStatus.Available
+                    : ProviderStatus.Degraded;
+
+            lastSuccess = _lastSuccessTime;
+        }
 
         return Task.FromResult(new TtsProviderInfo
         {
             Name = Name,
             Status = status,
-            LastSuccessTime = _lastSuccessTime,
+            LastSuccessTime = lastSuccess,
             SupportedVoices = voices
         });
     }
@@ -399,7 +420,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        _httpClient?.Dispose();
+        // Only dispose HttpClient if we created it (not externally provided)
+        if (_ownsHttpClient)
+        {
+            _httpClient?.Dispose();
+        }
     }
 
     /// <summary>
