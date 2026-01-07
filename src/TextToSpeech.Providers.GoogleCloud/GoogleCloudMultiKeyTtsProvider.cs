@@ -218,10 +218,10 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
 
             default:
                 var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogError(
-                    "API error {StatusCode} with key #{Index} ({Name}): {Error}",
+                _logger.LogWarning(
+                    "API error {StatusCode} with key #{Index} ({Name}), trying next key: {Error}",
                     (int)statusCode, keyStatus.Index, keyStatus.Name, errorContent);
-                return TtsResult.Fail($"API error: {statusCode}", Name, stopwatch.Elapsed);
+                return null; // Try next key on any error
         }
     }
 
