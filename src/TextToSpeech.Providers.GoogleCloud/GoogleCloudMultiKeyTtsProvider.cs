@@ -240,7 +240,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
 
         // Check if the error indicates an API key issue
         // Google returns 400 with "API key not valid" for invalid keys
-        if (errorContent.Contains("API key", StringComparison.OrdinalIgnoreCase))
+        if (errorContent.Contains("API key not valid", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning(
                 "API key error (400) with key #{Index} ({Name}), marking as invalid: {Error}",

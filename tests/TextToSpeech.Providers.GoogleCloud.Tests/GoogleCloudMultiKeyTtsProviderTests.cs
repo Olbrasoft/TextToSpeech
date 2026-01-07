@@ -347,7 +347,7 @@ public class GoogleCloudMultiKeyTtsProviderTests
     }
 
     [Fact]
-    public async Task SynthesizeAsync_Http400WithApiKeyError_FallsBackToNextKey()
+    public async Task SynthesizeAsync_Http400WithApiKeyError_FallsBackToNextKey_AndKeyStaysInvalid()
     {
         // Arrange
         var audioBytes = Encoding.UTF8.GetBytes("audio from second key");
@@ -368,14 +368,17 @@ public class GoogleCloudMultiKeyTtsProviderTests
         });
 
         var provider = CreateProvider(["invalid-key", "valid-key"], handler);
-        var ttsRequest = new TtsRequest { Text = "Test" };
 
-        // Act
-        var result = await provider.SynthesizeAsync(ttsRequest);
+        // Act - First call: invalid key (400) falls back to valid key
+        var result1 = await provider.SynthesizeAsync(new TtsRequest { Text = "Test 1" });
+
+        // Second call should skip invalid key and go directly to valid
+        var result2 = await provider.SynthesizeAsync(new TtsRequest { Text = "Test 2" });
 
         // Assert
-        Assert.True(result.Success);
-        Assert.Equal(2, callCount); // First key failed with 400, second succeeded
+        Assert.True(result1.Success);
+        Assert.True(result2.Success);
+        Assert.Equal(3, callCount); // 1 (invalid-400) + 1 (valid) + 1 (valid again, skipping invalid)
     }
 
     [Fact]
