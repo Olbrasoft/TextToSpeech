@@ -343,6 +343,69 @@ public class GoogleCloudMultiKeyTtsProviderTests
         Assert.Equal(1, (int)ApiKeyState.RateLimited);
         Assert.Equal(2, (int)ApiKeyState.QuotaExceeded);
         Assert.Equal(3, (int)ApiKeyState.Invalid);
+        Assert.Equal(4, (int)ApiKeyState.TemporaryError);
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_Http400WithApiKeyError_FallsBackToNextKey_AndKeyStaysInvalid()
+    {
+        // Arrange
+        var audioBytes = Encoding.UTF8.GetBytes("audio from second key");
+        var callCount = 0;
+
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent("{\"error\": {\"message\": \"API key not valid. Please pass a valid API key.\"}}")
+                };
+            }
+
+            return CreateSuccessResponse(audioBytes);
+        });
+
+        var provider = CreateProvider(["invalid-key", "valid-key"], handler);
+
+        // Act - First call: invalid key (400) falls back to valid key
+        var result1 = await provider.SynthesizeAsync(new TtsRequest { Text = "Test 1" });
+
+        // Second call should skip invalid key and go directly to valid
+        var result2 = await provider.SynthesizeAsync(new TtsRequest { Text = "Test 2" });
+
+        // Assert
+        Assert.True(result1.Success);
+        Assert.True(result2.Success);
+        Assert.Equal(3, callCount); // 1 (invalid-400) + 1 (valid) + 1 (valid again, skipping invalid)
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_Http400WithMalformedRequest_ReturnsFailWithoutFallback()
+    {
+        // Arrange
+        var callCount = 0;
+
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            callCount++;
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("{\"error\": {\"message\": \"Invalid value at 'audio_config.audio_encoding'\"}}")
+            };
+        });
+
+        var provider = CreateProvider(["key1", "key2"], handler);
+        var ttsRequest = new TtsRequest { Text = "Test" };
+
+        // Act
+        var result = await provider.SynthesizeAsync(ttsRequest);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal(1, callCount); // Should NOT try other keys for malformed request
+        Assert.Contains("Bad request", result.ErrorMessage);
     }
 
     [Fact]
