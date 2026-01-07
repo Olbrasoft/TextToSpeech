@@ -26,5 +26,11 @@ public enum ApiKeyState
     /// Key is permanently invalid (HTTP 401).
     /// Will not be used again.
     /// </summary>
-    Invalid
+    Invalid,
+
+    /// <summary>
+    /// Key encountered a temporary error (e.g., HTTP 400, 5xx).
+    /// Will become available after a short cooldown period.
+    /// </summary>
+    TemporaryError
 }
