@@ -217,6 +217,9 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 MarkKeyAsTemporaryError(keyStatus);
                 return null; // Try next key
 
+            case HttpStatusCode.BadRequest: // 400
+                return await HandleBadRequestAsync(keyStatus, response, stopwatch, cancellationToken);
+
             default:
                 var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning(
@@ -225,6 +228,33 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 MarkKeyAsTemporaryError(keyStatus);
                 return null; // Try next key on any error
         }
+    }
+
+    private async Task<TtsResult?> HandleBadRequestAsync(
+        ApiKeyStatus keyStatus,
+        HttpResponseMessage response,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        // Check if the error indicates an API key issue
+        // Google returns 400 with "API key not valid" for invalid keys
+        if (errorContent.Contains("API key", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "API key error (400) with key #{Index} ({Name}), marking as invalid: {Error}",
+                keyStatus.Index, keyStatus.Name, errorContent);
+            MarkKeyAsInvalid(keyStatus);
+            return null; // Try next key
+        }
+
+        // For other 400 errors (malformed request, invalid parameters), don't try other keys
+        _logger.LogError(
+            "Bad request (400) with key #{Index} ({Name}): {Error}",
+            keyStatus.Index, keyStatus.Name, errorContent);
+        stopwatch.Stop();
+        return TtsResult.Fail($"Bad request: {errorContent}", Name, stopwatch.Elapsed);
     }
 
     private async Task<TtsResult> HandleSuccessAsync(

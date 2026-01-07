@@ -343,6 +343,66 @@ public class GoogleCloudMultiKeyTtsProviderTests
         Assert.Equal(1, (int)ApiKeyState.RateLimited);
         Assert.Equal(2, (int)ApiKeyState.QuotaExceeded);
         Assert.Equal(3, (int)ApiKeyState.Invalid);
+        Assert.Equal(4, (int)ApiKeyState.TemporaryError);
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_Http400WithApiKeyError_FallsBackToNextKey()
+    {
+        // Arrange
+        var audioBytes = Encoding.UTF8.GetBytes("audio from second key");
+        var callCount = 0;
+
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent("{\"error\": {\"message\": \"API key not valid. Please pass a valid API key.\"}}")
+                };
+            }
+
+            return CreateSuccessResponse(audioBytes);
+        });
+
+        var provider = CreateProvider(["invalid-key", "valid-key"], handler);
+        var ttsRequest = new TtsRequest { Text = "Test" };
+
+        // Act
+        var result = await provider.SynthesizeAsync(ttsRequest);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(2, callCount); // First key failed with 400, second succeeded
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_Http400WithMalformedRequest_ReturnsFailWithoutFallback()
+    {
+        // Arrange
+        var callCount = 0;
+
+        var handler = new MockHttpMessageHandler(request =>
+        {
+            callCount++;
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("{\"error\": {\"message\": \"Invalid value at 'audio_config.audio_encoding'\"}}")
+            };
+        });
+
+        var provider = CreateProvider(["key1", "key2"], handler);
+        var ttsRequest = new TtsRequest { Text = "Test" };
+
+        // Act
+        var result = await provider.SynthesizeAsync(ttsRequest);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal(1, callCount); // Should NOT try other keys for malformed request
+        Assert.Contains("Bad request", result.ErrorMessage);
     }
 
     [Fact]
