@@ -214,6 +214,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 _logger.LogWarning(
                     "Server error {StatusCode} with key #{Index} ({Name}), trying next key",
                     (int)statusCode, keyStatus.Index, keyStatus.Name);
+                MarkKeyAsTemporaryError(keyStatus);
                 return null; // Try next key
 
             default:
@@ -221,6 +222,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 _logger.LogWarning(
                     "API error {StatusCode} with key #{Index} ({Name}), trying next key: {Error}",
                     (int)statusCode, keyStatus.Index, keyStatus.Name, errorContent);
+                MarkKeyAsTemporaryError(keyStatus);
                 return null; // Try next key on any error
         }
     }
@@ -331,6 +333,22 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             _logger.LogError(
                 "Key #{Index} ({Name}) is invalid (401), permanently disabled",
                 keyStatus.Index, keyStatus.Name);
+        }
+    }
+
+    private void MarkKeyAsTemporaryError(ApiKeyStatus keyStatus)
+    {
+        lock (_lock)
+        {
+            // Short cooldown to allow trying other keys in this request
+            // but allow retry in subsequent requests
+            var cooldownUntil = DateTime.UtcNow.AddSeconds(5);
+            keyStatus.State = ApiKeyState.TemporaryError;
+            keyStatus.CooldownUntil = cooldownUntil;
+
+            _logger.LogDebug(
+                "Key #{Index} ({Name}) marked as temporary error until {Until:O}",
+                keyStatus.Index, keyStatus.Name, cooldownUntil);
         }
     }
 
