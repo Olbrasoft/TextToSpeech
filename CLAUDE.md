@@ -83,6 +83,37 @@ src/
 4. ✅ **Configure** Piper in demo application
 5. ✅ **Test** with Czech text
 
+## CI/CD & NuGet Publishing
+
+**AUTOMATIC NuGet Publishing** - DO NOT manually create packages!
+
+**Workflow:** `.github/workflows/publish-nuget.yml`
+
+**Trigger:** Push to `main` branch (after PR merge)
+
+**What happens automatically:**
+1. GitHub Actions builds all projects
+2. Runs tests
+3. Creates NuGet packages with auto-incremented version
+4. Publishes ALL packages to NuGet.org:
+   - `Olbrasoft.TextToSpeech.Core`
+   - `Olbrasoft.TextToSpeech.Orchestration`
+   - `Olbrasoft.TextToSpeech.Providers`
+   - `Olbrasoft.TextToSpeech.Providers.EdgeTTS`
+   - `Olbrasoft.TextToSpeech.Providers.GoogleCloud`
+   - `Olbrasoft.TextToSpeech.Providers.Piper`
+
+**Versioning:** Automatic (e.g., 1.1.16, 1.1.17...)
+
+**After merge:** Just wait ~1 minute, packages appear on NuGet.org automatically.
+
+**Monitor:** `gh run list --repo Olbrasoft/TextToSpeech`
+
+**NEVER:**
+- ❌ Manually run `dotnet pack`
+- ❌ Manually push to NuGet.org
+- ❌ Try to set version numbers manually
+
 ## Never Again
 
 - ❌ NO more Python in this project
