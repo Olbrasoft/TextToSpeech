@@ -32,5 +32,13 @@ public enum ApiKeyState
     /// Key encountered a temporary error (e.g., HTTP 400, 5xx).
     /// Will become available after a short cooldown period.
     /// </summary>
-    TemporaryError
+    TemporaryError,
+
+    /// <summary>
+    /// Key has reached its configured monthly character limit (e.g., 1M chars on
+    /// Chirp3-HD free tier). Google will not return 429/403 - we self-throttle to
+    /// avoid silent paid usage. Becomes <see cref="Available"/> again on the 1st
+    /// day of the next month (UTC).
+    /// </summary>
+    MonthlyLimitExceeded
 }

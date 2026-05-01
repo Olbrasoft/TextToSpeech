@@ -80,6 +80,29 @@ public sealed class GoogleCloudMultiKeyConfiguration
     /// Default: 24 hours
     /// </summary>
     public TimeSpan QuotaExceededCooldown { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// Gets or sets the monthly character limit per key. When a key reaches this
+    /// number of synthesized characters in the current UTC month, it is taken
+    /// out of rotation until the 1st of the next month.
+    /// Default: 1 000 000 (Google Chirp3-HD free tier).
+    /// Set to 0 to disable the cap (key is never throttled by this counter).
+    /// </summary>
+    /// <remarks>
+    /// Google does NOT return 429 when the Chirp3-HD free tier is exhausted - it
+    /// silently bills $30 / 1M chars. This cap lets you stay strictly within the
+    /// free tier across multiple billing accounts.
+    /// </remarks>
+    public long MonthlyCharacterLimit { get; set; } = 1_000_000;
+
+    /// <summary>
+    /// Gets or sets whether to rotate between available keys in round-robin order.
+    /// When <c>false</c>, the provider always picks the first available key
+    /// (legacy behavior). When <c>true</c>, traffic is spread evenly across keys
+    /// so per-key counters approach their limit at roughly the same rate.
+    /// Default: <c>true</c>.
+    /// </summary>
+    public bool EnableRoundRobin { get; set; } = true;
 }
 
 /// <summary>
