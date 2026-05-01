@@ -159,8 +159,15 @@ public class RoundRobinAndMonthlyCounterTests
     [Fact]
     public async Task UsageStore_IsCalledAfterEachCall()
     {
-        var saves = new ConcurrentBag<ApiKeyUsageRecord>();
-        var store = new InMemoryStore(onSave: r => saves.Add(r));
+        // Deterministic wait: gate releases as soon as a save with the expected
+        // counter lands. Background worker is bounded - records can be
+        // collapsed - so we look for the final counter value, not call count.
+        var saved = new TaskCompletionSource<ApiKeyUsageRecord>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new InMemoryStore(onSave: r =>
+        {
+            if (r.MonthlyCharacterCount == 5) saved.TrySetResult(r);
+        });
 
         var handler = new MockHttpMessageHandler(_ => SuccessResponse());
 
@@ -173,18 +180,14 @@ public class RoundRobinAndMonthlyCounterTests
 
         await provider.SynthesizeAsync(new TtsRequest { Text = "hello" });
 
-        // Persistence is fire-and-forget; give it a moment.
-        for (var i = 0; i < 50 && saves.IsEmpty; i++) await Task.Delay(10);
-
-        Assert.NotEmpty(saves);
-        var last = saves.OrderByDescending(s => s.MonthlyCharacterCount).First();
-        Assert.Equal("key-1", last.KeyName);
-        Assert.Equal(5, last.MonthlyCharacterCount);
-        Assert.Equal(1, last.TotalSuccesses);
+        var record = await saved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("key-1", record.KeyName);
+        Assert.Equal(5, record.MonthlyCharacterCount);
+        Assert.Equal(1, record.TotalSuccesses);
     }
 
     [Fact]
-    public void UsageStore_HydratesCounterOnStartup_ForCurrentMonth()
+    public async Task UsageStore_HydratesCounterOnStartup_ForCurrentMonth()
     {
         var now = DateTime.UtcNow;
         var store = new InMemoryStore();
@@ -207,13 +210,14 @@ public class RoundRobinAndMonthlyCounterTests
             monthlyLimit: 1_000_000,
             store: store);
 
+        await provider.WaitForHydrationAsync().WaitAsync(TimeSpan.FromSeconds(5));
         var snap = provider.GetKeysUsage().Single();
         Assert.Equal(999_500, snap.MonthlyCharacterCount);
         Assert.Equal(42, snap.TotalSuccesses);
     }
 
     [Fact]
-    public void UsageStore_DiscardsCounterFromPreviousMonth()
+    public async Task UsageStore_DiscardsCounterFromPreviousMonth()
     {
         var now = DateTime.UtcNow;
         var store = new InMemoryStore();
@@ -234,9 +238,105 @@ public class RoundRobinAndMonthlyCounterTests
             monthlyLimit: 1_000_000,
             store: store);
 
+        await provider.WaitForHydrationAsync().WaitAsync(TimeSpan.FromSeconds(5));
         var snap = provider.GetKeysUsage().Single();
         Assert.Equal(0, snap.MonthlyCharacterCount); // reset on new month
         Assert.Equal(100, snap.TotalSuccesses);      // lifetime stats kept
+    }
+
+    [Fact]
+    public async Task UsageStore_HydratesParkedState_AcrossRestart()
+    {
+        // Persisted snapshot says key-1 was rate-limited and is still in cooldown.
+        var now = DateTime.UtcNow;
+        var store = new InMemoryStore();
+        store.Records["key-1"] = new ApiKeyUsageRecord
+        {
+            KeyName = "key-1",
+            Year = now.Year,
+            Month = now.Month,
+            MonthlyCharacterCount = 12_345,
+            TotalSuccesses = 5,
+            TotalFailures = 1,
+            ConsecutiveFailures = 1,
+            LastErrorUtc = now.AddMinutes(-2),
+            LastErrorReason = "429",
+            State = ApiKeyState.RateLimited,
+            CooldownUntilUtc = now.AddMinutes(30)
+        };
+
+        var provider = BuildProvider(
+            secretValues: ["k-A"],
+            handler: new MockHttpMessageHandler(_ => SuccessResponse()),
+            enableRoundRobin: true,
+            monthlyLimit: 1_000_000,
+            store: store);
+
+        await provider.WaitForHydrationAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var snap = provider.GetKeysUsage().Single();
+        Assert.Equal(ApiKeyState.RateLimited, snap.State);
+        Assert.NotNull(snap.CooldownUntilUtc);
+    }
+
+    [Fact]
+    public async Task UsageStore_ExpiredCooldownIsResetOnHydrate()
+    {
+        // Persisted state says rate-limited but the cooldown window has passed.
+        // After hydration the key should be Available again - no need to wait
+        // for the next routing pass to discover the timer expired.
+        var now = DateTime.UtcNow;
+        var store = new InMemoryStore();
+        store.Records["key-1"] = new ApiKeyUsageRecord
+        {
+            KeyName = "key-1",
+            Year = now.Year,
+            Month = now.Month,
+            MonthlyCharacterCount = 100,
+            State = ApiKeyState.RateLimited,
+            CooldownUntilUtc = now.AddMinutes(-1) // expired
+        };
+
+        var provider = BuildProvider(
+            secretValues: ["k-A"],
+            handler: new MockHttpMessageHandler(_ => SuccessResponse()),
+            enableRoundRobin: true,
+            monthlyLimit: 1_000_000,
+            store: store);
+
+        await provider.WaitForHydrationAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var snap = provider.GetKeysUsage().Single();
+        Assert.Equal(ApiKeyState.Available, snap.State);
+        Assert.Null(snap.CooldownUntilUtc);
+    }
+
+    [Fact]
+    public async Task PersistAsync_CollapsesBurstsToOneSavePerKey()
+    {
+        // Hammer the provider with many calls. The bounded last-write-wins
+        // pipeline must NOT save once per call - it must collapse intermediate
+        // values. We expect saves <= calls (often dramatically less).
+        var saveCount = 0;
+        var store = new InMemoryStore(onSave: _ => Interlocked.Increment(ref saveCount));
+
+        var provider = BuildProvider(
+            secretValues: ["k-A"],
+            handler: new MockHttpMessageHandler(_ => SuccessResponse()),
+            enableRoundRobin: true,
+            monthlyLimit: 0,
+            store: store);
+
+        const int callCount = 50;
+        for (var i = 0; i < callCount; i++)
+        {
+            await provider.SynthesizeAsync(new TtsRequest { Text = "x" });
+        }
+
+        // Drain settle window.
+        await Task.Delay(200);
+
+        Assert.True(saveCount > 0, "Expected at least one save");
+        Assert.True(saveCount <= callCount,
+            $"Save count {saveCount} should be <= call count {callCount} (channel must collapse bursts)");
     }
 
     [Fact]
@@ -266,7 +366,8 @@ public class RoundRobinAndMonthlyCounterTests
             enableRoundRobin: true,
             monthlyLimit: 0);
 
-        // 6 attempts. Sequence: A(ok), B(429 -> retry C ok), A, C, A, C.
+        // 5 successful syntheses. First call: A(ok); second: B(429 -> retry C ok);
+        // remaining three rotate A, C, A (B is parked, C is the next slot).
         for (var i = 0; i < 5; i++)
         {
             var r = await provider.SynthesizeAsync(new TtsRequest { Text = "x" });

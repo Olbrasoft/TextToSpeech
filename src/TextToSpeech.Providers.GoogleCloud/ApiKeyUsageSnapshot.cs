@@ -25,10 +25,18 @@ public sealed record ApiKeyUsageSnapshot
     /// <summary>Configured monthly character limit (informational; 0 = no limit).</summary>
     public long MonthlyCharacterLimit { get; init; }
 
-    /// <summary>Total successful calls observed in this process lifetime.</summary>
+    /// <summary>
+    /// Total successful calls. Persisted via <see cref="IApiKeyUsageStore"/> when
+    /// configured, so this is a lifetime counter across restarts; otherwise it is
+    /// process-local.
+    /// </summary>
     public long TotalSuccesses { get; init; }
 
-    /// <summary>Total failed calls observed in this process lifetime.</summary>
+    /// <summary>
+    /// Total failed calls. Persisted via <see cref="IApiKeyUsageStore"/> when
+    /// configured, so this is a lifetime counter across restarts; otherwise it is
+    /// process-local.
+    /// </summary>
     public long TotalFailures { get; init; }
 
     /// <summary>Consecutive failures since the last success.</summary>

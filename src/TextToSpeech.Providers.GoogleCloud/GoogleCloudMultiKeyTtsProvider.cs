@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Threading.Channels;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -27,6 +28,17 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     private readonly object _lock = new();
     private DateTime? _lastSuccessTime;
     private int _roundRobinCursor;
+
+    // Bounded persistence pipeline: producer (synthesis path) drops a record
+    // into a per-key slot; the background worker drains slots one at a time.
+    // Last-write-wins per key — superseded records are simply replaced before
+    // the worker picks them up, which is what we want (we only care about the
+    // freshest counter, not the history of intermediate values).
+    private readonly Channel<string>? _persistSignal;
+    private readonly Dictionary<string, ApiKeyUsageRecord>? _pendingPersists;
+    private readonly Task? _persistLoopTask;
+    private readonly CancellationTokenSource? _persistCts;
+    private readonly Task _hydrationTask = Task.CompletedTask;
 
     /// <summary>
     /// Initializes a new instance of GoogleCloudMultiKeyTtsProvider.
@@ -77,13 +89,39 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
 
         if (_usageStore != null)
         {
-            HydrateFromStore();
+            // Background persistence worker: bounded last-write-wins queue.
+            // Capacity 1 is intentional - the channel only signals "something
+            // dirty" and the worker drains _pendingPersists which already
+            // collapses duplicates per key.
+            _persistSignal = Channel.CreateBounded<string>(new BoundedChannelOptions(1)
+            {
+                FullMode = BoundedChannelFullMode.DropWrite,
+                SingleReader = true,
+                SingleWriter = false
+            });
+            _pendingPersists = new Dictionary<string, ApiKeyUsageRecord>(StringComparer.Ordinal);
+            _persistCts = new CancellationTokenSource();
+            _persistLoopTask = Task.Run(() => PersistLoopAsync(_persistCts.Token));
+
+            // Hydrate asynchronously to avoid sync-over-async on the constructor
+            // path. Synthesis is safe before hydration completes - keys default
+            // to Available, and any persisted "parked" state simply becomes
+            // visible once the load resolves.
+            _hydrationTask = Task.Run(HydrateFromStoreAsync);
         }
 
         _logger.LogInformation(
             "GoogleCloudMultiKeyTtsProvider initialized with {KeyCount} API keys (round-robin: {RoundRobin}, monthly cap: {Limit})",
             _keyStatuses.Count, _config.EnableRoundRobin, _config.MonthlyCharacterLimit);
     }
+
+    /// <summary>
+    /// Awaits initial hydration from the configured <see cref="IApiKeyUsageStore"/>.
+    /// Optional - synthesis is safe to invoke before this completes; in that
+    /// window keys behave as freshly-created (Available, zero counters). Useful
+    /// for dashboards that want to render the persisted state without races.
+    /// </summary>
+    public Task WaitForHydrationAsync() => _hydrationTask;
 
     /// <inheritdoc />
     public string Name => "GoogleCloudMultiKey";
@@ -518,7 +556,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
 
     private void PersistAsync(ApiKeyStatus keyStatus)
     {
-        if (_usageStore == null) return;
+        if (_usageStore == null || _persistSignal == null || _pendingPersists == null) return;
 
         ApiKeyUsageRecord record;
         lock (_lock)
@@ -526,20 +564,72 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             record = ToRecord(keyStatus);
         }
 
-        _ = Task.Run(async () =>
+        // Last-write-wins: replace any pending record for this key. The worker
+        // collapses bursts, so high-frequency synthesis produces O(keys) saves
+        // per drain cycle, not O(calls).
+        lock (_pendingPersists)
+        {
+            _pendingPersists[record.KeyName] = record;
+        }
+
+        // Channel capacity is 1; the kick is just "something is dirty".
+        // BoundedChannelFullMode.DropWrite means duplicate kicks are no-ops.
+        _persistSignal.Writer.TryWrite(record.KeyName);
+    }
+
+    private async Task PersistLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var _ in _persistSignal!.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await DrainPendingAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // shutdown
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Persistence loop terminated unexpectedly");
+        }
+
+        // Final drain on shutdown so the latest state is not lost.
+        try
+        {
+            await DrainPendingAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Final persistence drain failed");
+        }
+    }
+
+    private async Task DrainPendingAsync(CancellationToken cancellationToken)
+    {
+        List<ApiKeyUsageRecord> batch;
+        lock (_pendingPersists!)
+        {
+            if (_pendingPersists.Count == 0) return;
+            batch = [.. _pendingPersists.Values];
+            _pendingPersists.Clear();
+        }
+
+        foreach (var record in batch)
         {
             try
             {
-                await _usageStore.SaveAsync(record).ConfigureAwait(false);
+                await _usageStore!.SaveAsync(record, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to persist usage for key {Name}", keyStatus.Name);
+                _logger.LogWarning(ex, "Failed to persist usage for key {Name}", record.KeyName);
             }
-        });
+        }
     }
 
-    private static ApiKeyUsageRecord ToRecord(ApiKeyStatus key) => new()
+    private ApiKeyUsageRecord ToRecord(ApiKeyStatus key) => new()
     {
         KeyName = key.Name,
         Year = key.CounterYear,
@@ -550,38 +640,70 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         ConsecutiveFailures = key.ConsecutiveFailures,
         LastSuccessUtc = key.LastSuccessUtc,
         LastErrorUtc = key.LastErrorUtc,
-        LastErrorReason = key.LastErrorReason
+        LastErrorReason = key.LastErrorReason,
+        State = key.State,
+        CooldownUntilUtc = key.CooldownUntil
     };
 
-    private void HydrateFromStore()
+    private async Task HydrateFromStoreAsync()
     {
         var nowUtc = DateTime.UtcNow;
         foreach (var key in _keyStatuses)
         {
             try
             {
-                var record = _usageStore!.LoadAsync(key.Name).GetAwaiter().GetResult();
+                var record = await _usageStore!.LoadAsync(key.Name).ConfigureAwait(false);
                 if (record == null) continue;
 
-                if (record.Year == nowUtc.Year && record.Month == nowUtc.Month)
+                lock (_lock)
                 {
-                    key.MonthlyCharacterCount = record.MonthlyCharacterCount;
-                    key.CounterYear = record.Year;
-                    key.CounterMonth = record.Month;
-                }
-                else
-                {
-                    key.CounterYear = nowUtc.Year;
-                    key.CounterMonth = nowUtc.Month;
-                    key.MonthlyCharacterCount = 0;
-                }
+                    if (record.Year == nowUtc.Year && record.Month == nowUtc.Month)
+                    {
+                        key.MonthlyCharacterCount = record.MonthlyCharacterCount;
+                        key.CounterYear = record.Year;
+                        key.CounterMonth = record.Month;
+                    }
+                    else
+                    {
+                        key.CounterYear = nowUtc.Year;
+                        key.CounterMonth = nowUtc.Month;
+                        key.MonthlyCharacterCount = 0;
+                    }
 
-                key.TotalSuccesses = record.TotalSuccesses;
-                key.TotalFailures = record.TotalFailures;
-                key.ConsecutiveFailures = record.ConsecutiveFailures;
-                key.LastSuccessUtc = record.LastSuccessUtc;
-                key.LastErrorUtc = record.LastErrorUtc;
-                key.LastErrorReason = record.LastErrorReason;
+                    key.TotalSuccesses = record.TotalSuccesses;
+                    key.TotalFailures = record.TotalFailures;
+                    key.ConsecutiveFailures = record.ConsecutiveFailures;
+                    key.LastSuccessUtc = record.LastSuccessUtc;
+                    key.LastErrorUtc = record.LastErrorUtc;
+                    key.LastErrorReason = record.LastErrorReason;
+
+                    // Restore parked state across restarts. Expired cooldowns
+                    // are reset to Available (the live ResetMonthlyCounters /
+                    // GetNextAvailableKey paths would do the same on next call,
+                    // but we want a clean snapshot from the start).
+                    key.State = record.State;
+                    key.CooldownUntil = record.CooldownUntilUtc;
+
+                    if (key.State != ApiKeyState.Invalid
+                        && key.CooldownUntil.HasValue
+                        && key.CooldownUntil.Value <= nowUtc)
+                    {
+                        key.State = ApiKeyState.Available;
+                        key.CooldownUntil = null;
+                    }
+
+                    // If the persisted month matches and the counter already
+                    // hit the cap, reflect that as MonthlyLimitExceeded instead
+                    // of leaving stale State from before the cap was added.
+                    if (_config.MonthlyCharacterLimit > 0
+                        && key.MonthlyCharacterCount >= _config.MonthlyCharacterLimit
+                        && key.State == ApiKeyState.Available)
+                    {
+                        var nextMonth = new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1);
+                        key.State = ApiKeyState.MonthlyLimitExceeded;
+                        key.CooldownUntil = nextMonth;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -693,6 +815,21 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        if (_persistSignal != null)
+        {
+            _persistSignal.Writer.TryComplete();
+            _persistCts?.Cancel();
+            try
+            {
+                _persistLoopTask?.Wait(TimeSpan.FromSeconds(2));
+            }
+            catch
+            {
+                // best-effort drain on shutdown
+            }
+            _persistCts?.Dispose();
+        }
+
         if (_ownsHttpClient)
         {
             _httpClient?.Dispose();
