@@ -12,7 +12,9 @@ namespace Olbrasoft.TextToSpeech.Providers.GoogleCloud;
 
 /// <summary>
 /// TTS provider using Google Cloud Text-to-Speech API with multiple API key support.
-/// Automatically rotates between keys when rate limits or quotas are exceeded.
+/// Rotates between keys in round-robin order, tracks per-key monthly character usage
+/// (auto-reset on the 1st of each month UTC), and falls over on rate limits, quota
+/// exhaustion, invalid keys, or transient errors.
 /// </summary>
 public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
 {
@@ -20,9 +22,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     private readonly GoogleCloudMultiKeyConfiguration _config;
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly IApiKeyUsageStore? _usageStore;
     private readonly List<ApiKeyStatus> _keyStatuses;
     private readonly object _lock = new();
     private DateTime? _lastSuccessTime;
+    private int _roundRobinCursor;
 
     /// <summary>
     /// Initializes a new instance of GoogleCloudMultiKeyTtsProvider.
@@ -31,20 +35,21 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     /// <param name="configuration">Configuration containing resolved secret values from SecureStore.</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="httpClient">Optional HTTP client for testing.</param>
+    /// <param name="usageStore">Optional persistence store for per-key usage stats.</param>
     /// <exception cref="InvalidOperationException">Thrown when a secret key is not found in configuration.</exception>
     public GoogleCloudMultiKeyTtsProvider(
         IOptions<GoogleCloudMultiKeyConfiguration> options,
         IConfiguration configuration,
         ILogger<GoogleCloudMultiKeyTtsProvider> logger,
-        HttpClient? httpClient = null)
+        HttpClient? httpClient = null,
+        IApiKeyUsageStore? usageStore = null)
     {
         _config = options.Value;
         _logger = logger;
+        _usageStore = usageStore;
 
-        // Track ownership for proper disposal (don't dispose externally-provided HttpClient)
         _ownsHttpClient = httpClient == null;
 
-        // Validate configuration BEFORE creating HttpClient to avoid resource leaks
         var keyStatuses = _config.ApiKeySecrets
             .Select((keyConfig, index) =>
             {
@@ -59,21 +64,25 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 return new ApiKeyStatus
                 {
                     Index = index,
-                    Name = keyConfig.Name,
+                    Name = string.IsNullOrEmpty(keyConfig.Name) ? $"key-{index + 1}" : keyConfig.Name,
                     ActualKey = actualKey,
                     State = ApiKeyState.Available
                 };
             })
             .ToList();
 
-        // Only create/configure HttpClient after validation passes
         _httpClient = httpClient ?? new HttpClient();
         _httpClient.Timeout = _config.Timeout;
         _keyStatuses = keyStatuses;
 
+        if (_usageStore != null)
+        {
+            HydrateFromStore();
+        }
+
         _logger.LogInformation(
-            "GoogleCloudMultiKeyTtsProvider initialized with {KeyCount} API keys",
-            _keyStatuses.Count);
+            "GoogleCloudMultiKeyTtsProvider initialized with {KeyCount} API keys (round-robin: {RoundRobin}, monthly cap: {Limit})",
+            _keyStatuses.Count, _config.EnableRoundRobin, _config.MonthlyCharacterLimit);
     }
 
     /// <inheritdoc />
@@ -90,14 +99,14 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             return TtsResult.Fail("No API keys configured", Name, stopwatch.Elapsed);
         }
 
-        // Try each available key until one succeeds
-        // Max iterations = key count + 1 (safety margin to prevent infinite loops)
+        var charCount = request.Text?.Length ?? 0;
+
         var maxIterations = _keyStatuses.Count + 1;
         var iteration = 0;
 
         while (iteration++ < maxIterations)
         {
-            var keyStatus = GetNextAvailableKey();
+            var keyStatus = GetNextAvailableKey(charCount);
             if (keyStatus == null)
             {
                 stopwatch.Stop();
@@ -109,17 +118,14 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 "Using Google Cloud TTS key #{Index} ({Name})",
                 keyStatus.Index, keyStatus.Name);
 
-            var result = await TrySynthesizeWithKeyAsync(keyStatus, request, stopwatch, cancellationToken);
+            var result = await TrySynthesizeWithKeyAsync(keyStatus, request, charCount, stopwatch, cancellationToken);
 
             if (result != null)
             {
                 return result;
             }
-
-            // result is null means we should try the next key
         }
 
-        // Should never reach here, but safety fallback
         stopwatch.Stop();
         _logger.LogError("Max iterations reached in SynthesizeAsync - unexpected state");
         return TtsResult.Fail("Internal error: max iterations exceeded", Name, stopwatch.Elapsed);
@@ -128,6 +134,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     private async Task<TtsResult?> TrySynthesizeWithKeyAsync(
         ApiKeyStatus keyStatus,
         TtsRequest request,
+        int charCount,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -161,7 +168,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             var url = $"{GoogleCloudMultiKeyConfiguration.ApiEndpoint}?key={keyStatus.ActualKey}";
             var response = await _httpClient.PostAsync(url, content, cancellationToken);
 
-            return await HandleResponseAsync(keyStatus, response, stopwatch, cancellationToken);
+            return await HandleResponseAsync(keyStatus, response, charCount, stopwatch, cancellationToken);
         }
         catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -173,7 +180,8 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 ex,
                 "HTTP error with key #{Index} ({Name}), trying next key",
                 keyStatus.Index, keyStatus.Name);
-            return null; // Try next key
+            RecordFailure(keyStatus, "HttpRequestException");
+            return null;
         }
         catch (Exception ex)
         {
@@ -181,6 +189,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 ex,
                 "Unexpected error with key #{Index} ({Name})",
                 keyStatus.Index, keyStatus.Name);
+            RecordFailure(keyStatus, ex.GetType().Name);
             return TtsResult.Fail($"Unexpected error: {ex.Message}", Name, stopwatch.Elapsed);
         }
     }
@@ -188,6 +197,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     private async Task<TtsResult?> HandleResponseAsync(
         ApiKeyStatus keyStatus,
         HttpResponseMessage response,
+        int charCount,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -196,26 +206,26 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         switch (statusCode)
         {
             case HttpStatusCode.OK:
-                return await HandleSuccessAsync(keyStatus, response, stopwatch, cancellationToken);
+                return await HandleSuccessAsync(keyStatus, response, charCount, stopwatch, cancellationToken);
 
             case HttpStatusCode.TooManyRequests: // 429
                 MarkKeyAsRateLimited(keyStatus);
-                return null; // Try next key
+                return null;
 
             case HttpStatusCode.Forbidden: // 403
                 MarkKeyAsQuotaExceeded(keyStatus);
-                return null; // Try next key
+                return null;
 
             case HttpStatusCode.Unauthorized: // 401
                 MarkKeyAsInvalid(keyStatus);
-                return null; // Try next key
+                return null;
 
             case >= HttpStatusCode.InternalServerError: // 5xx
                 _logger.LogWarning(
                     "Server error {StatusCode} with key #{Index} ({Name}), trying next key",
                     (int)statusCode, keyStatus.Index, keyStatus.Name);
-                MarkKeyAsTemporaryError(keyStatus);
-                return null; // Try next key
+                MarkKeyAsTemporaryError(keyStatus, ((int)statusCode).ToString());
+                return null;
 
             case HttpStatusCode.BadRequest: // 400
                 return await HandleBadRequestAsync(keyStatus, response, stopwatch, cancellationToken);
@@ -225,8 +235,8 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
                 _logger.LogWarning(
                     "API error {StatusCode} with key #{Index} ({Name}), trying next key: {Error}",
                     (int)statusCode, keyStatus.Index, keyStatus.Name, errorContent);
-                MarkKeyAsTemporaryError(keyStatus);
-                return null; // Try next key on any error
+                MarkKeyAsTemporaryError(keyStatus, ((int)statusCode).ToString());
+                return null;
         }
     }
 
@@ -238,21 +248,19 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     {
         var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
 
-        // Check if the error indicates an API key issue
-        // Google returns 400 with "API key not valid" for invalid keys
         if (errorContent.Contains("API key not valid", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning(
                 "API key error (400) with key #{Index} ({Name}), marking as invalid: {Error}",
                 keyStatus.Index, keyStatus.Name, errorContent);
             MarkKeyAsInvalid(keyStatus);
-            return null; // Try next key
+            return null;
         }
 
-        // For other 400 errors (malformed request, invalid parameters), don't try other keys
         _logger.LogError(
             "Bad request (400) with key #{Index} ({Name}): {Error}",
             keyStatus.Index, keyStatus.Name, errorContent);
+        RecordFailure(keyStatus, "400");
         stopwatch.Stop();
         return TtsResult.Fail($"Bad request: {errorContent}", Name, stopwatch.Elapsed);
     }
@@ -260,6 +268,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     private async Task<TtsResult> HandleSuccessAsync(
         ApiKeyStatus keyStatus,
         HttpResponseMessage response,
+        int charCount,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -269,6 +278,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         if (responseObj?.audioContent == null)
         {
             _logger.LogError("No audio content received from Google Cloud TTS API");
+            RecordFailure(keyStatus, "NoAudioContent");
             return TtsResult.Fail("No audio content received", Name, stopwatch.Elapsed);
         }
 
@@ -281,10 +291,7 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             "Google Cloud TTS synthesis successful with key #{Index} ({Name}): {Bytes} bytes in {Ms}ms",
             keyStatus.Index, keyStatus.Name, audioBytes.Length, stopwatch.ElapsedMilliseconds);
 
-        lock (_lock)
-        {
-            _lastSuccessTime = DateTime.UtcNow;
-        }
+        RecordSuccess(keyStatus, charCount);
 
         var audioData = new MemoryAudioData
         {
@@ -295,34 +302,102 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         return TtsResult.Ok(audioData, Name, stopwatch.Elapsed);
     }
 
-    private ApiKeyStatus? GetNextAvailableKey()
+    /// <summary>
+    /// Picks the next key that is currently usable. Honors the round-robin cursor,
+    /// resets month boundaries lazily, expires cooldowns, and refuses keys whose
+    /// projected post-call counter would exceed the configured monthly cap.
+    /// </summary>
+    private ApiKeyStatus? GetNextAvailableKey(int charCount)
     {
         lock (_lock)
         {
             var now = DateTime.UtcNow;
+            ResetMonthlyCountersIfNewMonth(now);
 
-            // Filter out permanently invalid keys using explicit Where()
-            foreach (var key in _keyStatuses.Where(k => k.State != ApiKeyState.Invalid))
+            var count = _keyStatuses.Count;
+            if (count == 0) return null;
+
+            var startIndex = _config.EnableRoundRobin
+                ? Math.Abs(_roundRobinCursor) % count
+                : 0;
+
+            for (var offset = 0; offset < count; offset++)
             {
-                // Check if key is available
-                if (key.State == ApiKeyState.Available)
-                    return key;
+                var idx = (startIndex + offset) % count;
+                var key = _keyStatuses[idx];
 
-                // Check if cooldown expired
-                if (key.CooldownUntil.HasValue && key.CooldownUntil.Value <= now)
+                if (key.State == ApiKeyState.Invalid) continue;
+
+                if (key.State != ApiKeyState.Available
+                    && key.CooldownUntil.HasValue
+                    && key.CooldownUntil.Value <= now)
                 {
                     _logger.LogInformation(
                         "Key #{Index} ({Name}) cooldown expired, marking as available",
                         key.Index, key.Name);
-
                     key.State = ApiKeyState.Available;
                     key.CooldownUntil = null;
-                    return key;
                 }
+
+                if (key.State != ApiKeyState.Available) continue;
+
+                if (_config.MonthlyCharacterLimit > 0
+                    && key.MonthlyCharacterCount + charCount > _config.MonthlyCharacterLimit)
+                {
+                    // Skip THIS call but keep key Available - it may still fit
+                    // smaller requests later in the month.
+                    continue;
+                }
+
+                if (_config.EnableRoundRobin)
+                {
+                    _roundRobinCursor = (idx + 1) % count;
+                }
+
+                return key;
             }
 
-            return null; // All keys exhausted
+            return null;
         }
+    }
+
+    private void ResetMonthlyCountersIfNewMonth(DateTime nowUtc)
+    {
+        foreach (var key in _keyStatuses)
+        {
+            if (key.CounterYear == nowUtc.Year && key.CounterMonth == nowUtc.Month) continue;
+
+            _logger.LogInformation(
+                "Key #{Index} ({Name}) monthly counter reset {Old:yyyy-MM} -> {New:yyyy-MM}",
+                key.Index, key.Name,
+                new DateTime(key.CounterYear, key.CounterMonth, 1),
+                new DateTime(nowUtc.Year, nowUtc.Month, 1));
+
+            key.CounterYear = nowUtc.Year;
+            key.CounterMonth = nowUtc.Month;
+            key.MonthlyCharacterCount = 0;
+
+            if (key.State == ApiKeyState.MonthlyLimitExceeded)
+            {
+                key.State = ApiKeyState.Available;
+                key.CooldownUntil = null;
+            }
+        }
+    }
+
+    private void MarkKeyAsMonthlyLimitExceededLocked(ApiKeyStatus key, DateTime nowUtc)
+    {
+        var nextMonth = new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1);
+        key.State = ApiKeyState.MonthlyLimitExceeded;
+        key.CooldownUntil = nextMonth;
+        key.LastErrorReason = "MonthlyLimitExceeded";
+        key.LastErrorUtc = nowUtc;
+
+        _logger.LogWarning(
+            "Key #{Index} ({Name}) reached monthly cap ({Used}/{Limit} chars), held until {Until:yyyy-MM-dd}",
+            key.Index, key.Name, key.MonthlyCharacterCount, _config.MonthlyCharacterLimit, nextMonth);
+
+        PersistAsync(key);
     }
 
     private void MarkKeyAsRateLimited(ApiKeyStatus keyStatus)
@@ -332,11 +407,17 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             var cooldownUntil = DateTime.UtcNow.Add(_config.RateLimitCooldown);
             keyStatus.State = ApiKeyState.RateLimited;
             keyStatus.CooldownUntil = cooldownUntil;
+            keyStatus.LastErrorReason = "429";
+            keyStatus.LastErrorUtc = DateTime.UtcNow;
+            keyStatus.TotalFailures++;
+            keyStatus.ConsecutiveFailures++;
 
             _logger.LogWarning(
                 "Key #{Index} ({Name}) rate limited (429), marked as {State} until {Until:O}",
                 keyStatus.Index, keyStatus.Name, keyStatus.State, cooldownUntil);
         }
+
+        PersistAsync(keyStatus);
     }
 
     private void MarkKeyAsQuotaExceeded(ApiKeyStatus keyStatus)
@@ -346,11 +427,17 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             var cooldownUntil = DateTime.UtcNow.Add(_config.QuotaExceededCooldown);
             keyStatus.State = ApiKeyState.QuotaExceeded;
             keyStatus.CooldownUntil = cooldownUntil;
+            keyStatus.LastErrorReason = "403";
+            keyStatus.LastErrorUtc = DateTime.UtcNow;
+            keyStatus.TotalFailures++;
+            keyStatus.ConsecutiveFailures++;
 
             _logger.LogWarning(
                 "Key #{Index} ({Name}) quota exceeded (403), marked as {State} until {Until:O}",
                 keyStatus.Index, keyStatus.Name, keyStatus.State, cooldownUntil);
         }
+
+        PersistAsync(keyStatus);
     }
 
     private void MarkKeyAsInvalid(ApiKeyStatus keyStatus)
@@ -359,33 +446,179 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         {
             keyStatus.State = ApiKeyState.Invalid;
             keyStatus.CooldownUntil = null;
+            keyStatus.LastErrorReason = "401/Invalid";
+            keyStatus.LastErrorUtc = DateTime.UtcNow;
+            keyStatus.TotalFailures++;
+            keyStatus.ConsecutiveFailures++;
 
             _logger.LogError(
                 "Key #{Index} ({Name}) is invalid (401), permanently disabled",
                 keyStatus.Index, keyStatus.Name);
         }
+
+        PersistAsync(keyStatus);
     }
 
-    private void MarkKeyAsTemporaryError(ApiKeyStatus keyStatus)
+    private void MarkKeyAsTemporaryError(ApiKeyStatus keyStatus, string reason)
     {
         lock (_lock)
         {
-            // Short cooldown to allow trying other keys in this request
-            // but allow retry in subsequent requests
             var cooldownUntil = DateTime.UtcNow.AddSeconds(5);
             keyStatus.State = ApiKeyState.TemporaryError;
             keyStatus.CooldownUntil = cooldownUntil;
+            keyStatus.LastErrorReason = reason;
+            keyStatus.LastErrorUtc = DateTime.UtcNow;
+            keyStatus.TotalFailures++;
+            keyStatus.ConsecutiveFailures++;
 
             _logger.LogDebug(
                 "Key #{Index} ({Name}) marked as temporary error until {Until:O}",
                 keyStatus.Index, keyStatus.Name, cooldownUntil);
         }
+
+        PersistAsync(keyStatus);
+    }
+
+    private void RecordSuccess(ApiKeyStatus keyStatus, int charCount)
+    {
+        lock (_lock)
+        {
+            var now = DateTime.UtcNow;
+            ResetMonthlyCountersIfNewMonth(now);
+            keyStatus.MonthlyCharacterCount += charCount;
+            keyStatus.TotalSuccesses++;
+            keyStatus.ConsecutiveFailures = 0;
+            keyStatus.LastSuccessUtc = now;
+            _lastSuccessTime = now;
+
+            if (_config.MonthlyCharacterLimit > 0
+                && keyStatus.MonthlyCharacterCount >= _config.MonthlyCharacterLimit
+                && keyStatus.State == ApiKeyState.Available)
+            {
+                MarkKeyAsMonthlyLimitExceededLocked(keyStatus, now);
+                return;
+            }
+        }
+
+        PersistAsync(keyStatus);
+    }
+
+    private void RecordFailure(ApiKeyStatus keyStatus, string reason)
+    {
+        lock (_lock)
+        {
+            keyStatus.TotalFailures++;
+            keyStatus.ConsecutiveFailures++;
+            keyStatus.LastErrorReason = reason;
+            keyStatus.LastErrorUtc = DateTime.UtcNow;
+        }
+
+        PersistAsync(keyStatus);
+    }
+
+    private void PersistAsync(ApiKeyStatus keyStatus)
+    {
+        if (_usageStore == null) return;
+
+        ApiKeyUsageRecord record;
+        lock (_lock)
+        {
+            record = ToRecord(keyStatus);
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _usageStore.SaveAsync(record).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist usage for key {Name}", keyStatus.Name);
+            }
+        });
+    }
+
+    private static ApiKeyUsageRecord ToRecord(ApiKeyStatus key) => new()
+    {
+        KeyName = key.Name,
+        Year = key.CounterYear,
+        Month = key.CounterMonth,
+        MonthlyCharacterCount = key.MonthlyCharacterCount,
+        TotalSuccesses = key.TotalSuccesses,
+        TotalFailures = key.TotalFailures,
+        ConsecutiveFailures = key.ConsecutiveFailures,
+        LastSuccessUtc = key.LastSuccessUtc,
+        LastErrorUtc = key.LastErrorUtc,
+        LastErrorReason = key.LastErrorReason
+    };
+
+    private void HydrateFromStore()
+    {
+        var nowUtc = DateTime.UtcNow;
+        foreach (var key in _keyStatuses)
+        {
+            try
+            {
+                var record = _usageStore!.LoadAsync(key.Name).GetAwaiter().GetResult();
+                if (record == null) continue;
+
+                if (record.Year == nowUtc.Year && record.Month == nowUtc.Month)
+                {
+                    key.MonthlyCharacterCount = record.MonthlyCharacterCount;
+                    key.CounterYear = record.Year;
+                    key.CounterMonth = record.Month;
+                }
+                else
+                {
+                    key.CounterYear = nowUtc.Year;
+                    key.CounterMonth = nowUtc.Month;
+                    key.MonthlyCharacterCount = 0;
+                }
+
+                key.TotalSuccesses = record.TotalSuccesses;
+                key.TotalFailures = record.TotalFailures;
+                key.ConsecutiveFailures = record.ConsecutiveFailures;
+                key.LastSuccessUtc = record.LastSuccessUtc;
+                key.LastErrorUtc = record.LastErrorUtc;
+                key.LastErrorReason = record.LastErrorReason;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to hydrate usage for key {Name}; starting fresh", key.Name);
+            }
+        }
     }
 
     /// <summary>
-    /// Calculates speaking rate from integer rate (-100 to +100).
-    /// Maps: -100 -> 0.25, 0 -> 1.0, +100 -> 4.0
+    /// Returns a thread-safe snapshot of all keys' current state, suitable for
+    /// dashboards and health checks. Order matches the configured key order.
     /// </summary>
+    public IReadOnlyList<ApiKeyUsageSnapshot> GetKeysUsage()
+    {
+        lock (_lock)
+        {
+            ResetMonthlyCountersIfNewMonth(DateTime.UtcNow);
+            return _keyStatuses
+                .Select(k => new ApiKeyUsageSnapshot
+                {
+                    Index = k.Index,
+                    Name = k.Name,
+                    State = k.State,
+                    CooldownUntilUtc = k.CooldownUntil,
+                    MonthlyCharacterCount = k.MonthlyCharacterCount,
+                    MonthlyCharacterLimit = _config.MonthlyCharacterLimit,
+                    TotalSuccesses = k.TotalSuccesses,
+                    TotalFailures = k.TotalFailures,
+                    ConsecutiveFailures = k.ConsecutiveFailures,
+                    LastSuccessUtc = k.LastSuccessUtc,
+                    LastErrorUtc = k.LastErrorUtc,
+                    LastErrorReason = k.LastErrorReason
+                })
+                .ToList();
+        }
+    }
+
     private double CalculateSpeakingRate(int rate)
     {
         if (rate == 0) return _config.SpeakingRate;
@@ -396,19 +629,12 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             : 1.0 + (normalized * 0.75);
     }
 
-    /// <summary>
-    /// Calculates pitch from integer pitch (-100 to +100).
-    /// Maps: -100 -> -20.0, 0 -> 0.0, +100 -> +20.0
-    /// </summary>
     private double CalculatePitch(int pitch)
     {
         if (pitch == 0) return _config.Pitch;
         return (pitch / 100.0) * 20.0;
     }
 
-    /// <summary>
-    /// Extracts language code from voice name (e.g., "cs-CZ-Chirp3-HD-Achird" -> "cs-CZ").
-    /// </summary>
     private static string ExtractLanguageCode(string voice)
     {
         var parts = voice.Split('-');
@@ -436,12 +662,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             Gender = "Male"
         }).ToList();
 
-        // Determine status based on available keys
-        // Note: _keyStatuses is immutable after construction, but we use lock for consistent state
         ProviderStatus status;
         DateTime? lastSuccess;
         lock (_lock)
         {
+            ResetMonthlyCountersIfNewMonth(DateTime.UtcNow);
             var totalKeys = _keyStatuses.Count;
             var availableKeys = _keyStatuses.Count(k =>
                 k.State == ApiKeyState.Available ||
@@ -468,16 +693,12 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        // Only dispose HttpClient if we created it (not externally provided)
         if (_ownsHttpClient)
         {
             _httpClient?.Dispose();
         }
     }
 
-    /// <summary>
-    /// Internal class tracking the state of a single API key.
-    /// </summary>
     private sealed class ApiKeyStatus
     {
         public int Index { get; init; }
@@ -485,5 +706,16 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         public required string ActualKey { get; init; }
         public ApiKeyState State { get; set; } = ApiKeyState.Available;
         public DateTime? CooldownUntil { get; set; }
+
+        public int CounterYear { get; set; } = DateTime.UtcNow.Year;
+        public int CounterMonth { get; set; } = DateTime.UtcNow.Month;
+        public long MonthlyCharacterCount { get; set; }
+
+        public long TotalSuccesses { get; set; }
+        public long TotalFailures { get; set; }
+        public int ConsecutiveFailures { get; set; }
+        public DateTime? LastSuccessUtc { get; set; }
+        public DateTime? LastErrorUtc { get; set; }
+        public string? LastErrorReason { get; set; }
     }
 }
