@@ -29,7 +29,9 @@ public interface IApiKeyUsageStore
 }
 
 /// <summary>
-/// Persisted snapshot of a single API key's usage and health.
+/// Persisted snapshot of a single API key's usage and health. Restored verbatim
+/// on provider startup, so a rate-limited / quota-exceeded / invalid key keeps
+/// its status across process restarts.
 /// </summary>
 public sealed record ApiKeyUsageRecord
 {
@@ -45,10 +47,10 @@ public sealed record ApiKeyUsageRecord
     /// <summary>Characters synthesized in this UTC month.</summary>
     public required long MonthlyCharacterCount { get; init; }
 
-    /// <summary>Total successful syntheses (lifetime).</summary>
+    /// <summary>Total successful syntheses (lifetime, persisted across restarts).</summary>
     public long TotalSuccesses { get; init; }
 
-    /// <summary>Total failed syntheses (lifetime).</summary>
+    /// <summary>Total failed syntheses (lifetime, persisted across restarts).</summary>
     public long TotalFailures { get; init; }
 
     /// <summary>Number of consecutive failures since the last success.</summary>
@@ -62,4 +64,17 @@ public sealed record ApiKeyUsageRecord
 
     /// <summary>Free-form reason of the last error (e.g. "429", "401", "MonthlyLimitExceeded").</summary>
     public string? LastErrorReason { get; init; }
+
+    /// <summary>
+    /// Routing state at the moment the snapshot was saved. Restored on startup so
+    /// rate-limited / quota-exceeded / invalid keys remain parked across process
+    /// restarts. Defaults to <see cref="ApiKeyState.Available"/>.
+    /// </summary>
+    public ApiKeyState State { get; init; } = ApiKeyState.Available;
+
+    /// <summary>
+    /// UTC time until which the key is on cooldown (null if available or invalid).
+    /// On hydrate, expired cooldowns reset the key to <see cref="ApiKeyState.Available"/>.
+    /// </summary>
+    public DateTime? CooldownUntilUtc { get; init; }
 }
