@@ -140,10 +140,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         // Wait for initial hydration before touching any key state. Without
         // this, hydration could clobber counters that a concurrent synthesis
         // already incremented (race observed in PR #21 review). Subsequent
-        // calls hit a completed task - no measurable cost.
+        // calls hit a completed task - no measurable cost. Honors the caller's
+        // cancellation token so a slow/hung backing store cannot pin the call.
         if (!_hydrationTask.IsCompletedSuccessfully)
         {
-            await _hydrationTask.ConfigureAwait(false);
+            await _hydrationTask.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         var charCount = request.Text?.Length ?? 0;
@@ -775,10 +776,11 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     /// <inheritdoc />
     public async Task<TtsProviderInfo> GetInfoAsync(CancellationToken cancellationToken = default)
     {
-        // Surface persisted state on the first call after restart.
+        // Surface persisted state on the first call after restart. Honors
+        // the caller's cancellation so a slow store can't hang dashboards.
         if (!_hydrationTask.IsCompletedSuccessfully)
         {
-            await _hydrationTask.ConfigureAwait(false);
+            await _hydrationTask.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         var czechMaleVoices = new[]

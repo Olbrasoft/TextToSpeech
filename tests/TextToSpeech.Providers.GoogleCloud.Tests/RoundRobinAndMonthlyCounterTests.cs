@@ -312,10 +312,11 @@ public class RoundRobinAndMonthlyCounterTests
     [Fact]
     public async Task PersistAsync_CollapsesBurstsToOneSavePerKey()
     {
-        // Determinism trick: hold SaveAsync on a TaskCompletionSource so the
-        // worker can't drain while we're enqueuing. Push N synthesis calls;
-        // by the time we release the gate the persistence channel has
-        // accumulated duplicates that the worker collapses. Without bounded
+        // Determinism trick: every SaveAsync awaits a TaskCompletionSource,
+        // so the worker can take a record off the queue but cannot complete
+        // a save until we release the gate. While the worker is parked
+        // mid-save, additional synthesis calls keep landing fresh records in
+        // _pendingPersists, which the next drain collapses. Without bounded
         // last-write-wins this would be ~callCount saves; with it, a handful.
         var saveCount = 0;
         var saveGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

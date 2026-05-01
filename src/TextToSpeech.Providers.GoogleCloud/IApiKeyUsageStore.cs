@@ -32,10 +32,13 @@ public interface IApiKeyUsageStore
 /// Persisted snapshot of a single API key's usage and health. Loaded on startup
 /// and used to seed the in-memory state, with normalization applied: elapsed
 /// cooldowns reset to <see cref="ApiKeyState.Available"/>; counters reset when
-/// the persisted month no longer matches the current UTC month; and a key is
-/// forced to <see cref="ApiKeyState.MonthlyLimitExceeded"/> if its counter
-/// already meets the configured limit. The persisted record is therefore not
-/// applied verbatim - it is reconciled with current wall-clock state.
+/// the persisted month no longer matches the current UTC month; and a key
+/// otherwise <see cref="ApiKeyState.Available"/> is upgraded to
+/// <see cref="ApiKeyState.MonthlyLimitExceeded"/> when its persisted counter
+/// already meets the configured cap (other parked states such as
+/// <see cref="ApiKeyState.RateLimited"/> / <see cref="ApiKeyState.Invalid"/>
+/// are kept as persisted). The record is therefore not applied verbatim - it
+/// is reconciled with current wall-clock state.
 /// </summary>
 public sealed record ApiKeyUsageRecord
 {
