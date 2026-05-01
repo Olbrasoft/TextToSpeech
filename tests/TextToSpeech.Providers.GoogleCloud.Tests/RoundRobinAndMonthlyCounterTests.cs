@@ -312,31 +312,50 @@ public class RoundRobinAndMonthlyCounterTests
     [Fact]
     public async Task PersistAsync_CollapsesBurstsToOneSavePerKey()
     {
-        // Hammer the provider with many calls. The bounded last-write-wins
-        // pipeline must NOT save once per call - it must collapse intermediate
-        // values. We expect saves <= calls (often dramatically less).
+        // Determinism trick: every SaveAsync awaits a TaskCompletionSource,
+        // so the worker can take a record off the queue but cannot complete
+        // a save until we release the gate. While the worker is parked
+        // mid-save, additional synthesis calls keep landing fresh records in
+        // _pendingPersists, which the next drain collapses. Without bounded
+        // last-write-wins this would be ~callCount saves; with it, a handful.
         var saveCount = 0;
-        var store = new InMemoryStore(onSave: _ => Interlocked.Increment(ref saveCount));
+        var saveGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new InMemoryStore(onSave: _ => Interlocked.Increment(ref saveCount))
+        {
+            BeforeSave = () => saveGate.Task
+        };
 
         var provider = BuildProvider(
-            secretValues: ["k-A"],
+            secretValues: ["k-A", "k-B", "k-C"],
             handler: new MockHttpMessageHandler(_ => SuccessResponse()),
             enableRoundRobin: true,
             monthlyLimit: 0,
             store: store);
 
-        const int callCount = 50;
+        await provider.WaitForHydrationAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        const int callCount = 60;
         for (var i = 0; i < callCount; i++)
         {
             await provider.SynthesizeAsync(new TtsRequest { Text = "x" });
         }
 
-        // Drain settle window.
-        await Task.Delay(200);
+        saveGate.SetResult(true);
+
+        // Wait for the queue to settle: poll until saveCount stops climbing.
+        var prev = -1;
+        for (var i = 0; i < 100 && saveCount != prev; i++)
+        {
+            prev = saveCount;
+            await Task.Delay(20);
+        }
 
         Assert.True(saveCount > 0, "Expected at least one save");
-        Assert.True(saveCount <= callCount,
-            $"Save count {saveCount} should be <= call count {callCount} (channel must collapse bursts)");
+        // Tight upper bound: 3 keys, even allowing for a handful of drain
+        // cycles, total saves must be << callCount. Anything close to 60
+        // means the channel didn't collapse anything.
+        Assert.True(saveCount <= 12,
+            $"Save count {saveCount} should be <= 12 (3 keys x ~few drains); channel must collapse bursts. callCount={callCount}");
     }
 
     [Fact]
@@ -427,6 +446,7 @@ public class RoundRobinAndMonthlyCounterTests
     private sealed class InMemoryStore : IApiKeyUsageStore
     {
         public ConcurrentDictionary<string, ApiKeyUsageRecord> Records { get; } = new();
+        public Func<Task>? BeforeSave { get; set; }
         private readonly Action<ApiKeyUsageRecord>? _onSave;
 
         public InMemoryStore(Action<ApiKeyUsageRecord>? onSave = null) => _onSave = onSave;
@@ -434,11 +454,11 @@ public class RoundRobinAndMonthlyCounterTests
         public Task<ApiKeyUsageRecord?> LoadAsync(string keyName, CancellationToken cancellationToken = default)
             => Task.FromResult(Records.TryGetValue(keyName, out var r) ? r : null);
 
-        public Task SaveAsync(ApiKeyUsageRecord record, CancellationToken cancellationToken = default)
+        public async Task SaveAsync(ApiKeyUsageRecord record, CancellationToken cancellationToken = default)
         {
+            if (BeforeSave != null) await BeforeSave().ConfigureAwait(false);
             Records[record.KeyName] = record;
             _onSave?.Invoke(record);
-            return Task.CompletedTask;
         }
     }
 

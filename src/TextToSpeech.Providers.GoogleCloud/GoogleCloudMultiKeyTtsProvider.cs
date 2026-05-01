@@ -104,9 +104,9 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             _persistLoopTask = Task.Run(() => PersistLoopAsync(_persistCts.Token));
 
             // Hydrate asynchronously to avoid sync-over-async on the constructor
-            // path. Synthesis is safe before hydration completes - keys default
-            // to Available, and any persisted "parked" state simply becomes
-            // visible once the load resolves.
+            // path. SynthesizeAsync awaits this task before touching any key
+            // state, so hydration cannot clobber counters incremented by an
+            // in-flight call (the previous design had a clobber race).
             _hydrationTask = Task.Run(HydrateFromStoreAsync);
         }
 
@@ -117,9 +117,9 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
 
     /// <summary>
     /// Awaits initial hydration from the configured <see cref="IApiKeyUsageStore"/>.
-    /// Optional - synthesis is safe to invoke before this completes; in that
-    /// window keys behave as freshly-created (Available, zero counters). Useful
-    /// for dashboards that want to render the persisted state without races.
+    /// <see cref="SynthesizeAsync"/> already awaits this internally, so callers
+    /// only need it to render a consistent snapshot via <see cref="GetKeysUsage"/>
+    /// or <see cref="GetInfoAsync"/> before any synthesis has happened.
     /// </summary>
     public Task WaitForHydrationAsync() => _hydrationTask;
 
@@ -135,6 +135,16 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
         {
             _logger.LogError("No API keys configured for GoogleCloudMultiKey provider");
             return TtsResult.Fail("No API keys configured", Name, stopwatch.Elapsed);
+        }
+
+        // Wait for initial hydration before touching any key state. Without
+        // this, hydration could clobber counters that a concurrent synthesis
+        // already incremented (race observed in PR #21 review). Subsequent
+        // calls hit a completed task - no measurable cost. Honors the caller's
+        // cancellation token so a slow/hung backing store cannot pin the call.
+        if (!_hydrationTask.IsCompletedSuccessfully)
+        {
+            await _hydrationTask.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         var charCount = request.Text?.Length ?? 0;
@@ -764,8 +774,15 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
     }
 
     /// <inheritdoc />
-    public Task<TtsProviderInfo> GetInfoAsync(CancellationToken cancellationToken = default)
+    public async Task<TtsProviderInfo> GetInfoAsync(CancellationToken cancellationToken = default)
     {
+        // Surface persisted state on the first call after restart. Honors
+        // the caller's cancellation so a slow store can't hang dashboards.
+        if (!_hydrationTask.IsCompletedSuccessfully)
+        {
+            await _hydrationTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         var czechMaleVoices = new[]
         {
             "cs-CZ-Chirp3-HD-Achird", "cs-CZ-Chirp3-HD-Algenib", "cs-CZ-Chirp3-HD-Algieba",
@@ -803,13 +820,13 @@ public sealed class GoogleCloudMultiKeyTtsProvider : ITtsProvider, IDisposable
             lastSuccess = _lastSuccessTime;
         }
 
-        return Task.FromResult(new TtsProviderInfo
+        return new TtsProviderInfo
         {
             Name = Name,
             Status = status,
             LastSuccessTime = lastSuccess,
             SupportedVoices = voices
-        });
+        };
     }
 
     /// <inheritdoc />
